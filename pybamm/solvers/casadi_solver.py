@@ -495,63 +495,86 @@ class CasadiSolver(pybamm.BaseSolver):
 
         # Use grid if t_eval is given
         use_grid = t_eval is not None
-        if use_grid is True:
+        if use_grid:
             t_eval_shifted = t_eval - t_eval[0]
             t_eval_shifted_rounded = np.round(t_eval_shifted, decimals=12).tobytes()
+            time_args = [t_eval_shifted[0], t_eval_shifted[1:]]
+        else:
+            time_args = []
 
         # Only set up problem once
-        if model in self.integrators:
-            # If we're not using the grid, we don't need to change the integrator
-            """
-            if use_grid is False:
-                integrator = self.integrators[model]["no grid"]
-            # Otherwise, create new integrator with an updated grid
-            # We don't need to update the grid if reusing the same t_eval
-            # (up to a shift by a constant)
-            elif t_eval_shifted_rounded in self.integrators[model]:
-                integrator = self.integrators[model][t_eval_shifted_rounded]
-            else:
-            """
-            method, problem, options, time_args = self.integrator_specs[model]
-            if "init_xdot" in options:
-                init_xdot = model.rhs_eval(0, model.y0, inputs).full().reshape(-1)
-                options["init_xdot"] = np.asarray(init_xdot)
+        new_integrator = model not in self.integrators
 
-            if use_grid is True:
-                time_args = [t_eval_shifted[0], t_eval_shifted[1:]]
-            else:
-                time_args = []
+        if new_integrator:
+            integrator = self._new_integrator(
+                model, inputs, time_args, use_grid, use_event_switch
+            )
+        else:
+            integrator = self._reuse_integrator(model, inputs, time_args)
 
-            integrator = casadi.integrator("F", method, problem, *time_args, options)
+        if use_grid:
+            self.integrators[model] = {t_eval_shifted_rounded: integrator}
+        elif new_integrator:
+            self.integrators[model] = {"no grid": integrator}
 
-            if use_grid is True:
-                self.integrators[model][t_eval_shifted_rounded] = integrator
+        return integrator
 
-            return integrator
+    def _reuse_integrator(self, model, inputs, time_args):
+        # If we're not using the grid, we don't need to change the integrator
+        """
+        if use_grid is False:
+            integrator = self.integrators[model]["no grid"]
+        # Otherwise, create new integrator with an updated grid
+        # We don't need to update the grid if reusing the same t_eval
+        # (up to a shift by a constant)
+        elif t_eval_shifted_rounded in self.integrators[model]:
+            integrator = self.integrators[model][t_eval_shifted_rounded]
+        else:
+        """
+        method, problem, options, _ = self.integrator_specs[model]
+        # Initial guess for xdot
+        if "init_xdot" in options:
+            init_xdot = model.rhs_eval(0, model.y0, inputs).full().reshape(-1)
+            options["init_xdot"] = np.asarray(init_xdot)
 
+        integrator = casadi.integrator("F", method, problem, *time_args, options)
+
+        return integrator
+
+    def _new_integrator(self, model, inputs, time_args, use_grid, use_event_switch):
         rhs = model.casadi_rhs
         algebraic = model.casadi_algebraic
+
+        # set up and solve
+        t = casadi.MX.sym("t")
+        p = casadi.MX.sym("p", inputs.shape[0])
+
+        len_rhs = model.len_rhs + model.len_rhs_sens
+        len_alg = model.len_alg + model.len_alg_sens
+
+        dae_system = len_alg > 0
+
+        y_diff = casadi.MX.sym("y_diff", len_rhs)
+        y_alg = casadi.MX.sym("y_alg", len_alg)
+        y_full = casadi.vertcat(y_diff, y_alg)
 
         options = {
             "show_eval_warnings": False,
             **self.extra_options_setup,
             "reltol": self.rtol,
             "abstol": self.atol,
-            # "nonlin_conv_coeff": 200,
+            # "nonlin_conv_coeff": 0.0033,
             # "verbose": True,
         }
 
-        # set up and solve
-        t = casadi.MX.sym("t")
-        p = casadi.MX.sym("p", inputs.shape[0])
-        y0 = model.y0
-
-        y_diff = casadi.MX.sym("y_diff", rhs(0, y0, p).shape[0])
-        y_alg = casadi.MX.sym("y_alg", algebraic(0, y0, p).shape[0])
-        y_full = casadi.vertcat(y_diff, y_alg)
-
-        if use_grid is False:
-            time_args = []
+        if use_grid:
+            # rescale time
+            t_min = casadi.MX.sym("t_min")
+            # Set dummy parameters for consistency with rescaled time
+            t_max_minus_t_min = 1
+            t_scaled = t_min + t
+            p_with_tlims = casadi.vertcat(p, t_min)
+        else:
             # rescale time
             t_min = casadi.MX.sym("t_min")
             t_max = casadi.MX.sym("t_max")
@@ -559,37 +582,33 @@ class CasadiSolver(pybamm.BaseSolver):
             t_scaled = t_min + (t_max - t_min) * t
             # add time limits as inputs
             p_with_tlims = casadi.vertcat(p, t_min, t_max)
-        else:
-            time_args = [t_eval_shifted[0], t_eval_shifted[1:]]
-            # rescale time
-            t_min = casadi.MX.sym("t_min")
-            # Set dummy parameters for consistency with rescaled time
-            t_max_minus_t_min = 1
-            t_scaled = t_min + t
-            p_with_tlims = casadi.vertcat(p, t_min)
 
         # define the event switch as the point when an event is crossed
         # we don't do this for ODE models
         # see #1082
-        event_switch = 1
-        if use_event_switch is True and not algebraic(0, y0, p).is_empty():
+
+        rhs_scaled = (t_max_minus_t_min) * rhs(t_scaled, y_full, p)
+
+        if use_event_switch is True and dae_system:
+            event_switch = 1
             for event in model.casadi_switch_events:
                 event_switch *= event(t_scaled, y_full, p)
+            rhs_scaled *= event_switch
 
         problem = {
             "t": t,
             "x": y_diff,
             # rescale rhs by (t_max - t_min)
-            "ode": (t_max_minus_t_min) * rhs(t_scaled, y_full, p) * event_switch,
+            "ode": rhs_scaled,
             "p": p_with_tlims,
         }
-        if algebraic(0, y0, p).is_empty():
+        if not dae_system:
             method = "cvodes"
         else:
             method = "idas"
 
-            init_xdot = model.rhs_eval(0, model.y0, inputs).full().reshape(-1)
-            if len(init_xdot) > 1:
+            if len_rhs > 1:
+                init_xdot = model.rhs_eval(0, model.y0, inputs).full().reshape(-1)
                 options["init_xdot"] = np.asarray(init_xdot)
 
             problem.update(
@@ -600,10 +619,6 @@ class CasadiSolver(pybamm.BaseSolver):
             )
         integrator = casadi.integrator("F", method, problem, *time_args, options)
         self.integrator_specs[model] = method, problem, options, time_args
-        if use_grid is False:
-            self.integrators[model] = {"no grid": integrator}
-        else:
-            self.integrators[model] = {t_eval_shifted_rounded: integrator}
 
         return integrator
 
@@ -651,7 +666,7 @@ class CasadiSolver(pybamm.BaseSolver):
         if extract_sensitivities_in_solution is None:
             extract_sensitivities_in_solution = explicit_sensitivities
 
-        if use_grid is True:
+        if use_grid:
             pybamm.logger.spam("Calculating t_eval_shifted")
             t_eval_shifted = t_eval - t_eval[0]
             t_eval_shifted_rounded = np.round(t_eval_shifted, decimals=12).tobytes()
@@ -660,18 +675,14 @@ class CasadiSolver(pybamm.BaseSolver):
         else:
             integrator = self.integrators[model]["no grid"]
 
-        len_rhs = model.concatenated_rhs.size
-        len_alg = model.concatenated_algebraic.size
+        len_rhs = model.len_rhs + model.len_rhs_sens
+        len_alg = model.len_alg + model.len_alg_sens
 
-        # Check y0 to see if it includes sensitivities
-        if explicit_sensitivities:
-            num_parameters = model.len_rhs_sens // model.len_rhs
-            len_rhs = len_rhs * (num_parameters + 1)
-            len_alg = len_alg * (num_parameters + 1)
+        dae_system = len_alg > 0
 
         y0_diff = y0[:len_rhs]
         y0_alg_exact = y0[len_rhs:]
-        if self.perturb_algebraic_initial_conditions and len_alg > 0:
+        if self.perturb_algebraic_initial_conditions and dae_system:
             # Add a tiny perturbation to the algebraic initial conditions
             # For some reason this helps with convergence
             # The actual value of the initial conditions for the algebraic variables
@@ -701,7 +712,7 @@ class CasadiSolver(pybamm.BaseSolver):
             integration_time = timer.time()
             # Manually add initial conditions and concatenate
             x_sol = casadi.horzcat(y0_diff, casadi_sol["xf"])
-            if len_alg > 0:
+            if dae_system:
                 z_sol = casadi.horzcat(y0_alg_exact, casadi_sol["zf"])
                 y_sol = casadi.vertcat(x_sol, z_sol)
             else:
@@ -716,43 +727,43 @@ class CasadiSolver(pybamm.BaseSolver):
             )
             sol.integration_time = integration_time
             return sol
-        else:
-            # Repeated calls to the integrator
-            x = y0_diff
-            z = y0_alg_exact
-            y_diff = x
-            y_alg = z
-            for i in range(len(t_eval) - 1):
-                t_min = t_eval[i]
-                t_max = t_eval[i + 1]
-                inputs_with_tlims = casadi.vertcat(inputs, t_min, t_max)
-                timer = pybamm.Timer()
-                try:
-                    casadi_sol = integrator(
-                        x0=x, z0=z, p=inputs_with_tlims, **self.extra_options_call
-                    )
-                except RuntimeError as error:
-                    # If it doesn't work raise error
-                    pybamm.logger.debug(f"Casadi integrator failed with error {error}")
-                    raise pybamm.SolverError(error.args[0]) from error
-                integration_time = timer.time()
-                x = casadi_sol["xf"]
-                z = casadi_sol["zf"]
-                y_diff = casadi.horzcat(y_diff, x)
-                if not z.is_empty():
-                    y_alg = casadi.horzcat(y_alg, z)
-            if z.is_empty():
-                y_sol = y_diff
-            else:
-                y_sol = casadi.vertcat(y_diff, y_alg)
 
-            sol = pybamm.Solution(
-                t_eval,
-                y_sol,
-                model,
-                inputs_dict,
-                sensitivities=extract_sensitivities_in_solution,
-                check_solution=False,
-            )
-            sol.integration_time = integration_time
-            return sol
+        # Repeated calls to the integrator
+        x = y0_diff
+        z = y0_alg_exact
+        y_diff = x
+        y_alg = z
+        for i in range(len(t_eval) - 1):
+            t_min = t_eval[i]
+            t_max = t_eval[i + 1]
+            inputs_with_tlims = casadi.vertcat(inputs, t_min, t_max)
+            timer = pybamm.Timer()
+            try:
+                casadi_sol = integrator(
+                    x0=x, z0=z, p=inputs_with_tlims, **self.extra_options_call
+                )
+            except RuntimeError as error:
+                # If it doesn't work raise error
+                pybamm.logger.debug(f"Casadi integrator failed with error {error}")
+                raise pybamm.SolverError(error.args[0]) from error
+            integration_time = timer.time()
+            x = casadi_sol["xf"]
+            z = casadi_sol["zf"]
+            y_diff = casadi.horzcat(y_diff, x)
+            if dae_system:
+                y_alg = casadi.horzcat(y_alg, z)
+        if dae_system:
+            y_sol = casadi.vertcat(y_diff, y_alg)
+        else:
+            y_sol = y_diff
+
+        sol = pybamm.Solution(
+            t_eval,
+            y_sol,
+            model,
+            inputs_dict,
+            sensitivities=extract_sensitivities_in_solution,
+            check_solution=False,
+        )
+        sol.integration_time = integration_time
+        return sol

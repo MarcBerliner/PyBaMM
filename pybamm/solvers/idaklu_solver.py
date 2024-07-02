@@ -549,8 +549,15 @@ class IDAKLUSolver(pybamm.BaseSolver):
             y0S = (x.full() for x in y0S)
             y0S = [x.flatten() for x in y0S]
 
-        # solver works with ydot0 set to zero
-        ydot0 = np.zeros_like(y0)
+        if model.convert_to_format == "casadi":
+            ydot0 = model.rhs_algebraic_eval(0.0, model.y0, inputs).full().reshape(-1)
+        else:
+            # solver works with ydot0 set to zero
+            ydot0 = np.zeros_like(y0)
+            ydot0 = self._setup["resfn"](0, y0, inputs, ydot0)
+        # ydot0 = (model.mass_matrix @ ydot0)
+        # ydot0 *= 0
+
         if y0S is not None:
             ydot0S = [np.zeros_like(y0S_i) for y0S_i in y0S]
             y0full = np.concatenate([y0, *y0S])
