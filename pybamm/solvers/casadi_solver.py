@@ -115,10 +115,7 @@ class CasadiSolver(pybamm.BaseSolver):
         # Decide whether to perturb algebraic initial conditions, True by default for
         # "safe" mode, False by default for other modes
         if perturb_algebraic_initial_conditions is None:
-            if mode == "safe":
-                self.perturb_algebraic_initial_conditions = True
-            else:
-                self.perturb_algebraic_initial_conditions = False
+            self.perturb_algebraic_initial_conditions = mode == "safe"
         else:
             self.perturb_algebraic_initial_conditions = (
                 perturb_algebraic_initial_conditions
@@ -501,96 +498,114 @@ class CasadiSolver(pybamm.BaseSolver):
         if use_grid is True:
             t_eval_shifted = t_eval - t_eval[0]
             t_eval_shifted_rounded = np.round(t_eval_shifted, decimals=12).tobytes()
+
         # Only set up problem once
         if model in self.integrators:
             # If we're not using the grid, we don't need to change the integrator
+            """
             if use_grid is False:
-                return self.integrators[model]["no grid"]
+                integrator = self.integrators[model]["no grid"]
             # Otherwise, create new integrator with an updated grid
             # We don't need to update the grid if reusing the same t_eval
             # (up to a shift by a constant)
+            elif t_eval_shifted_rounded in self.integrators[model]:
+                integrator = self.integrators[model][t_eval_shifted_rounded]
             else:
-                if t_eval_shifted_rounded in self.integrators[model]:
-                    return self.integrators[model][t_eval_shifted_rounded]
-                else:
-                    method, problem, options, time_args = self.integrator_specs[model]
-                    time_args = [t_eval_shifted[0], t_eval_shifted[1:]]
-                    integrator = casadi.integrator(
-                        "F", method, problem, *time_args, options
-                    )
-                    self.integrators[model][t_eval_shifted_rounded] = integrator
-                    return integrator
-        else:
-            rhs = model.casadi_rhs
-            algebraic = model.casadi_algebraic
+            """
+            method, problem, options, time_args = self.integrator_specs[model]
+            if "init_xdot" in options:
+                init_xdot = model.rhs_eval(0, model.y0, inputs).full().reshape(-1)
+                options["init_xdot"] = np.asarray(init_xdot)
 
-            options = {
-                "show_eval_warnings": False,
-                **self.extra_options_setup,
-                "reltol": self.rtol,
-                "abstol": self.atol,
-            }
-
-            # set up and solve
-            t = casadi.MX.sym("t")
-            p = casadi.MX.sym("p", inputs.shape[0])
-            y0 = model.y0
-
-            y_diff = casadi.MX.sym("y_diff", rhs(0, y0, p).shape[0])
-            y_alg = casadi.MX.sym("y_alg", algebraic(0, y0, p).shape[0])
-            y_full = casadi.vertcat(y_diff, y_alg)
-
-            if use_grid is False:
-                time_args = []
-                # rescale time
-                t_min = casadi.MX.sym("t_min")
-                t_max = casadi.MX.sym("t_max")
-                t_max_minus_t_min = t_max - t_min
-                t_scaled = t_min + (t_max - t_min) * t
-                # add time limits as inputs
-                p_with_tlims = casadi.vertcat(p, t_min, t_max)
-            else:
+            if use_grid is True:
                 time_args = [t_eval_shifted[0], t_eval_shifted[1:]]
-                # rescale time
-                t_min = casadi.MX.sym("t_min")
-                # Set dummy parameters for consistency with rescaled time
-                t_max_minus_t_min = 1
-                t_scaled = t_min + t
-                p_with_tlims = casadi.vertcat(p, t_min)
-
-            # define the event switch as the point when an event is crossed
-            # we don't do this for ODE models
-            # see #1082
-            event_switch = 1
-            if use_event_switch is True and not algebraic(0, y0, p).is_empty():
-                for event in model.casadi_switch_events:
-                    event_switch *= event(t_scaled, y_full, p)
-
-            problem = {
-                "t": t,
-                "x": y_diff,
-                # rescale rhs by (t_max - t_min)
-                "ode": (t_max_minus_t_min) * rhs(t_scaled, y_full, p) * event_switch,
-                "p": p_with_tlims,
-            }
-            if algebraic(0, y0, p).is_empty():
-                method = "cvodes"
             else:
-                method = "idas"
-                problem.update(
-                    {
-                        "z": y_alg,
-                        "alg": algebraic(t_scaled, y_full, p),
-                    }
-                )
+                time_args = []
+
             integrator = casadi.integrator("F", method, problem, *time_args, options)
-            self.integrator_specs[model] = method, problem, options, time_args
-            if use_grid is False:
-                self.integrators[model] = {"no grid": integrator}
-            else:
-                self.integrators[model] = {t_eval_shifted_rounded: integrator}
+
+            if use_grid is True:
+                self.integrators[model][t_eval_shifted_rounded] = integrator
 
             return integrator
+
+        rhs = model.casadi_rhs
+        algebraic = model.casadi_algebraic
+
+        options = {
+            "show_eval_warnings": False,
+            **self.extra_options_setup,
+            "reltol": self.rtol,
+            "abstol": self.atol,
+            # "nonlin_conv_coeff": 200,
+            # "verbose": True,
+        }
+
+        # set up and solve
+        t = casadi.MX.sym("t")
+        p = casadi.MX.sym("p", inputs.shape[0])
+        y0 = model.y0
+
+        y_diff = casadi.MX.sym("y_diff", rhs(0, y0, p).shape[0])
+        y_alg = casadi.MX.sym("y_alg", algebraic(0, y0, p).shape[0])
+        y_full = casadi.vertcat(y_diff, y_alg)
+
+        if use_grid is False:
+            time_args = []
+            # rescale time
+            t_min = casadi.MX.sym("t_min")
+            t_max = casadi.MX.sym("t_max")
+            t_max_minus_t_min = t_max - t_min
+            t_scaled = t_min + (t_max - t_min) * t
+            # add time limits as inputs
+            p_with_tlims = casadi.vertcat(p, t_min, t_max)
+        else:
+            time_args = [t_eval_shifted[0], t_eval_shifted[1:]]
+            # rescale time
+            t_min = casadi.MX.sym("t_min")
+            # Set dummy parameters for consistency with rescaled time
+            t_max_minus_t_min = 1
+            t_scaled = t_min + t
+            p_with_tlims = casadi.vertcat(p, t_min)
+
+        # define the event switch as the point when an event is crossed
+        # we don't do this for ODE models
+        # see #1082
+        event_switch = 1
+        if use_event_switch is True and not algebraic(0, y0, p).is_empty():
+            for event in model.casadi_switch_events:
+                event_switch *= event(t_scaled, y_full, p)
+
+        problem = {
+            "t": t,
+            "x": y_diff,
+            # rescale rhs by (t_max - t_min)
+            "ode": (t_max_minus_t_min) * rhs(t_scaled, y_full, p) * event_switch,
+            "p": p_with_tlims,
+        }
+        if algebraic(0, y0, p).is_empty():
+            method = "cvodes"
+        else:
+            method = "idas"
+
+            init_xdot = model.rhs_eval(0, model.y0, inputs).full().reshape(-1)
+            if len(init_xdot) > 1:
+                options["init_xdot"] = np.asarray(init_xdot)
+
+            problem.update(
+                {
+                    "z": y_alg,
+                    "alg": algebraic(t_scaled, y_full, p),
+                }
+            )
+        integrator = casadi.integrator("F", method, problem, *time_args, options)
+        self.integrator_specs[model] = method, problem, options, time_args
+        if use_grid is False:
+            self.integrators[model] = {"no grid": integrator}
+        else:
+            self.integrators[model] = {t_eval_shifted_rounded: integrator}
+
+        return integrator
 
     def _run_integrator(
         self,
