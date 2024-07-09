@@ -157,6 +157,9 @@ class IDAKLUSolver(pybamm.BaseSolver):
     def set_up(self, model, inputs=None, t_eval=None, ics_only=False):
         base_set_up_return = super().set_up(model, inputs, t_eval, ics_only)
 
+        if ics_only:
+            return base_set_up_return
+
         inputs_dict = inputs or {}
         # stack inputs
         if inputs_dict:
@@ -178,25 +181,6 @@ class IDAKLUSolver(pybamm.BaseSolver):
         if isinstance(y0, casadi.DM):
             y0 = y0.full()
         y0 = y0.flatten()
-
-        y0S = model.y0S
-        # only casadi solver needs sensitivity ics
-        if model.convert_to_format != "casadi":
-            y0S = None
-            if self.output_variables:
-                raise pybamm.SolverError(
-                    "output_variables can only be specified "
-                    'with convert_to_format="casadi"'
-                )  # pragma: no cover
-        if y0S is not None:
-            if isinstance(y0S, casadi.DM):
-                y0S = (y0S,)
-
-            y0S = (x.full() for x in y0S)
-            y0S = [x.flatten() for x in y0S]
-
-        if ics_only:
-            return base_set_up_return
 
         if model.convert_to_format == "jax":
             mass_matrix = model.mass_matrix.entries.toarray()
@@ -532,32 +516,12 @@ class IDAKLUSolver(pybamm.BaseSolver):
         else:
             inputs = np.array([[]])
 
-        # do this here cause y0 is set after set_up (calc consistent conditions)
-        y0 = model.y0
-        if isinstance(y0, casadi.DM):
-            y0 = y0.full()
-        y0 = y0.flatten()
-
-        y0S = model.y0S
-        # only casadi solver needs sensitivity ics
-        if model.convert_to_format != "casadi":
-            y0S = None
-        if y0S is not None:
-            if isinstance(y0S, casadi.DM):
-                y0S = (y0S,)
-
-            y0S = (x.full() for x in y0S)
-            y0S = [x.flatten() for x in y0S]
-
-        # solver works with ydot0 set to zero
-        ydot0 = np.zeros_like(y0)
-        if y0S is not None:
-            ydot0S = [np.zeros_like(y0S_i) for y0S_i in y0S]
-            y0full = np.concatenate([y0, *y0S])
-            ydot0full = np.concatenate([ydot0, *ydot0S])
+        if hasattr(model, "y0full"):
+            y0full = model.y0full
+            ydot0full = model.ydot0full
         else:
-            y0full = y0
-            ydot0full = ydot0
+            y0full = model.y0
+            ydot0full = np.zeros_like(y0full)
 
         try:
             atol = model.atol
@@ -565,7 +529,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
             atol = self.atol
 
         rtol = self.rtol
-        atol = self._check_atol_type(atol, y0.size)
+        atol = self._check_atol_type(atol, y0full.size)
 
         timer = pybamm.Timer()
         if model.convert_to_format == "casadi":
@@ -578,8 +542,8 @@ class IDAKLUSolver(pybamm.BaseSolver):
         else:
             sol = idaklu.solve_python(
                 t_eval,
-                y0,
-                ydot0,
+                y0full,
+                ydot0full,
                 self._setup["resfn"],
                 self._setup["jac_class"].jac_res,
                 self._setup["sensfn"],
@@ -604,7 +568,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
         sensitivity_names = self._setup["sensitivity_names"]
         t = sol.t
         number_of_timesteps = t.size
-        number_of_states = y0.size
+        number_of_states = model.len_rhs_and_alg
         if self.output_variables:
             # Substitute empty vectors for state vector 'y'
             y_out = np.zeros((number_of_timesteps * number_of_states, 0))
@@ -625,58 +589,112 @@ class IDAKLUSolver(pybamm.BaseSolver):
         else:
             yS_out = False
 
-        if sol.flag in [0, 2]:
-            # 0 = solved for all t_eval
-            if sol.flag == 0:
-                termination = "final time"
-            # 2 = found root(s)
-            elif sol.flag == 2:
-                termination = "event"
-
-            newsol = pybamm.Solution(
-                sol.t,
-                np.transpose(y_out),
-                model,
-                inputs_dict,
-                np.array([t[-1]]),
-                np.transpose(y_out[-1])[:, np.newaxis],
-                termination,
-                sensitivities=yS_out,
-            )
-            newsol.integration_time = integration_time
-            if self.output_variables:
-                # Populate variables and sensititivies dictionaries directly
-                number_of_samples = sol.y.shape[0] // number_of_timesteps
-                sol.y = sol.y.reshape((number_of_timesteps, number_of_samples))
-                startk = 0
-                for _, var in enumerate(self.output_variables):
-                    # ExplicitTimeIntegral's are not computed as part of the solver and
-                    # do not need to be converted
-                    if isinstance(
-                        model.variables_and_events[var], pybamm.ExplicitTimeIntegral
-                    ):
-                        continue
-                    len_of_var = (
-                        self._setup["var_casadi_fcns"][var](0, 0, 0).sparsity().nnz()
-                    )
-                    newsol._variables[var] = pybamm.ProcessedVariableComputed(
-                        [model.variables_and_events[var]],
-                        [self._setup["var_casadi_fcns"][var]],
-                        [sol.y[:, startk : (startk + len_of_var)]],
-                        newsol,
-                    )
-                    # Add sensitivities
-                    newsol[var]._sensitivities = {}
-                    if model.calculate_sensitivities:
-                        for paramk, param in enumerate(inputs_dict.keys()):
-                            newsol[var].add_sensitivity(
-                                param,
-                                [sol.yS[:, startk : (startk + len_of_var), paramk]],
-                            )
-                    startk += len_of_var
-            return newsol
-        else:
+        if sol.flag not in [0, 2]:
             raise pybamm.SolverError("idaklu solver failed")
+
+        # 0 = solved for all t_eval
+        if sol.flag == 0:
+            termination = "final time"
+        # 2 = found root(s)
+        elif sol.flag == 2:
+            termination = "event"
+
+        newsol = pybamm.Solution(
+            sol.t,
+            np.transpose(y_out),
+            model,
+            inputs_dict,
+            np.array([t[-1]]),
+            np.transpose(y_out[-1])[:, np.newaxis],
+            termination,
+            sensitivities=yS_out,
+        )
+        newsol.integration_time = integration_time
+        if self.output_variables:
+            # Populate variables and sensititivies dictionaries directly
+            number_of_samples = sol.y.shape[0] // number_of_timesteps
+            sol.y = sol.y.reshape((number_of_timesteps, number_of_samples))
+            startk = 0
+            for _, var in enumerate(self.output_variables):
+                # ExplicitTimeIntegral's are not computed as part of the solver and
+                # do not need to be converted
+                if isinstance(
+                    model.variables_and_events[var], pybamm.ExplicitTimeIntegral
+                ):
+                    continue
+                len_of_var = (
+                    self._setup["var_casadi_fcns"][var](0, 0, 0).sparsity().nnz()
+                )
+                newsol._variables[var] = pybamm.ProcessedVariableComputed(
+                    [model.variables_and_events[var]],
+                    [self._setup["var_casadi_fcns"][var]],
+                    [sol.y[:, startk : (startk + len_of_var)]],
+                    newsol,
+                )
+                # Add sensitivities
+                newsol[var]._sensitivities = {}
+                if model.calculate_sensitivities:
+                    for paramk, param in enumerate(inputs_dict.keys()):
+                        newsol[var].add_sensitivity(
+                            param,
+                            [sol.yS[:, startk : (startk + len_of_var), paramk]],
+                        )
+                startk += len_of_var
+        return newsol
+
+    def _set_initial_conditions(self, model, time, inputs_dict, update_rhs):
+        super()._set_initial_conditions(model, time, inputs_dict, update_rhs)
+
+        casadi_format = model.convert_to_format == "casadi"
+        if casadi_format:
+            # stack inputs
+            inputs = casadi.vertcat(*[x for x in inputs_dict.values()])
+
+            # only casadi solver needs sensitivity ics
+            y0S = model.y0S
+        else:
+            inputs = inputs_dict
+            y0S = None
+
+        # do this here cause y0 is set after set_up (calc consistent conditions)
+        y0 = model.y0
+        if isinstance(y0, casadi.DM):
+            y0 = y0.full()
+        y0 = y0.flatten()
+
+        ydot0 = np.zeros_like(y0)
+        if model.mass_matrix_inv is not None:
+            # calculate the time derivatives of the differential equations
+            rhs_alg0 = model.rhs_algebraic_eval(0.0, model.y0, inputs)
+            if casadi_format:
+                rhs_alg0 = rhs_alg0.full()
+            rhs_alg0 = rhs_alg0.flatten()
+
+            rhs0 = rhs_alg0[: model.len_rhs]
+            rhsdot0 = model.mass_matrix_inv.entries @ rhs0
+
+            # ydot0 = M^-1 * (rhs)
+            ydot0[: model.len_rhs] = rhsdot0
+
+        sensitivity = casadi_format and (y0S is not None)
+        if sensitivity:
+            if isinstance(y0S, casadi.DM):
+                y0S = (y0S,)
+
+            y0S = (x.full() for x in y0S)
+            y0S = [x.flatten() for x in y0S]
+
+            ydot0S = [np.zeros_like(y0S_i) for y0S_i in y0S]
+            y0full = np.concatenate([y0, *y0S])
+            ydot0full = np.concatenate([ydot0, *ydot0S])
+        else:
+            y0full = y0
+            ydot0full = ydot0
+
+        model.y0full = y0full
+        model.ydot0full = ydot0full
+
+        return
 
     def jaxify(
         self,

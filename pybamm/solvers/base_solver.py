@@ -616,6 +616,10 @@ class BaseSolver:
 
         """
 
+        if self.algebraic_solver:
+            # Don't update model.y0
+            return
+
         y0_total_size = (
             model.len_rhs + model.len_rhs_sens + model.len_alg + model.len_alg_sens
         )
@@ -627,18 +631,14 @@ class BaseSolver:
         else:
             inputs = inputs_dict
 
-        if self.algebraic_solver is True:
-            # Don't update model.y0
-            return
-        elif len(model.algebraic) == 0:
-            if update_rhs is True:
-                # Recalculate initial conditions for the rhs equations
-                y0 = model.initial_conditions_eval(time, y_zero, inputs)
-            else:
+        if len(model.algebraic) == 0:
+            if not update_rhs:
                 # Don't update model.y0
                 return
+            # Recalculate initial conditions for the rhs equations
+            y0 = model.initial_conditions_eval(time, y_zero, inputs)
         else:
-            if update_rhs is True:
+            if update_rhs:
                 # Recalculate initial conditions for the rhs equations
                 y0_from_inputs = model.initial_conditions_eval(time, y_zero, inputs)
                 # Reuse old solution for algebraic equations
@@ -906,26 +906,25 @@ class BaseSolver:
                     model_inputs_list[0],
                 )
                 new_solutions = [new_solution]
+            elif model.convert_to_format == "jax":
+                # Jax can parallelize over the inputs efficiently
+                new_solutions = self._integrate(
+                    model,
+                    t_eval[start_index:end_index],
+                    model_inputs_list,
+                )
             else:
-                if model.convert_to_format == "jax":
-                    # Jax can parallelize over the inputs efficiently
-                    new_solutions = self._integrate(
-                        model,
-                        t_eval[start_index:end_index],
-                        model_inputs_list,
+                with mp.get_context(self._mp_context).Pool(processes=nproc) as p:
+                    new_solutions = p.starmap(
+                        self._integrate,
+                        zip(
+                            [model] * ninputs,
+                            [t_eval[start_index:end_index]] * ninputs,
+                            model_inputs_list,
+                        ),
                     )
-                else:
-                    with mp.get_context(self._mp_context).Pool(processes=nproc) as p:
-                        new_solutions = p.starmap(
-                            self._integrate,
-                            zip(
-                                [model] * ninputs,
-                                [t_eval[start_index:end_index]] * ninputs,
-                                model_inputs_list,
-                            ),
-                        )
-                        p.close()
-                        p.join()
+                    p.close()
+                    p.join()
             # Setting the solve time for each segment.
             # pybamm.Solution.__add__ assumes attribute solve_time.
             solve_time = timer.time()
@@ -1164,15 +1163,12 @@ class BaseSolver:
             )
             t_eval = np.linspace(0, dt, npts)
 
-        if t_eval is not None:
-            # Checking if t_eval lies within range
-            if t_eval[0] != 0 or t_eval[-1] != dt:
-                raise pybamm.SolverError(
-                    "Elements inside array t_eval must lie in the closed interval 0 to dt"
-                )
-
-        else:
+        if t_eval is None:
             t_eval = np.array([0, dt])
+        elif t_eval[0] != 0 or t_eval[-1] != dt:
+            raise pybamm.SolverError(
+                "Elements inside array t_eval must lie in the closed interval 0 to dt"
+            )
 
         t_start = old_solution.t[-1]
         t_eval = t_start + t_eval
