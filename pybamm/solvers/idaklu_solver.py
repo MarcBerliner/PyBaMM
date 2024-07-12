@@ -516,12 +516,8 @@ class IDAKLUSolver(pybamm.BaseSolver):
         else:
             inputs = np.array([[]])
 
-        if hasattr(model, "y0full"):
-            y0full = model.y0full
-            ydot0full = model.ydot0full
-        else:
-            y0full = model.y0
-            ydot0full = np.zeros_like(y0full)
+        y0full = getattr(model, "y0full", model.y0)
+        ydot0full = getattr(model, "ydot0full", np.zeros_like(y0full))
 
         try:
             atol = model.atol
