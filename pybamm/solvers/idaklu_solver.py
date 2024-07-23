@@ -558,12 +558,17 @@ class IDAKLUSolver(pybamm.BaseSolver):
             )
         integration_time = timer.time()
 
-        number_of_sensitivity_parameters = self._setup[
-            "number_of_sensitivity_parameters"
-        ]
+        # 0 = solved for all t_eval
+        if sol.flag == 0:
+            termination = "final time"
+        # 2 = found root(s)
+        elif sol.flag == 2:
+            termination = "event"
+        else:
+            raise pybamm.SolverError("idaklu solver failed")
+
         sensitivity_names = self._setup["sensitivity_names"]
-        t = sol.t
-        number_of_timesteps = t.size
+        number_of_timesteps = sol.t.size
         number_of_states = model.len_rhs_and_alg
         if self.output_variables:
             # Substitute empty vectors for state vector 'y'
@@ -575,7 +580,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
         # (#timesteps * #states (where t is changing the quickest),)
         # to match format used by Solution
         # note that yS is (n_p, n_t, n_y)
-        if number_of_sensitivity_parameters != 0:
+        if model.calculate_sensitivities:
             yS_out = {
                 name: sol.yS[i].reshape(-1, 1)
                 for i, name in enumerate(sensitivity_names)
@@ -585,60 +590,38 @@ class IDAKLUSolver(pybamm.BaseSolver):
         else:
             yS_out = False
 
-        if sol.flag not in [0, 2]:
-            raise pybamm.SolverError("idaklu solver failed")
-
-        # 0 = solved for all t_eval
-        if sol.flag == 0:
-            termination = "final time"
-        # 2 = found root(s)
-        elif sol.flag == 2:
-            termination = "event"
-
         newsol = pybamm.Solution(
             sol.t,
             np.transpose(y_out),
             model,
             inputs_dict,
-            np.array([t[-1]]),
+            np.array([sol.t[-1]]),
             np.transpose(y_out[-1])[:, np.newaxis],
             termination,
             sensitivities=yS_out,
         )
         newsol.integration_time = integration_time
-        if self.output_variables:
-            # Populate variables and sensititivies dictionaries directly
-            number_of_samples = sol.y.shape[0] // number_of_timesteps
-            sol.y = sol.y.reshape((number_of_timesteps, number_of_samples))
-            startk = 0
-            for _, var in enumerate(self.output_variables):
-                # ExplicitTimeIntegral's are not computed as part of the solver and
-                # do not need to be converted
-                if isinstance(
-                    model.variables_and_events[var], pybamm.ExplicitTimeIntegral
-                ):
-                    continue
-                len_of_var = (
-                    self._setup["var_casadi_fcns"][var](0, 0, 0).sparsity().nnz()
-                )
-                newsol._variables[var] = pybamm.ProcessedVariableComputed(
-                    [model.variables_and_events[var]],
-                    [self._setup["var_casadi_fcns"][var]],
-                    [sol.y[:, startk : (startk + len_of_var)]],
-                    newsol,
-                )
-                # Add sensitivities
-                newsol[var]._sensitivities = {}
-                if model.calculate_sensitivities:
-                    for paramk, param in enumerate(inputs_dict.keys()):
-                        newsol[var].add_sensitivity(
-                            param,
-                            [sol.yS[:, startk : (startk + len_of_var), paramk]],
-                        )
-                startk += len_of_var
+
+        self._process_output_variables(model, inputs_dict, sol, newsol)
+
         return newsol
 
     def _set_initial_conditions(self, model, time, inputs_dict, update_rhs):
+        """
+        Set initial conditions of y0 and ydot0 for the solver.
+
+        Parameters
+        ----------
+        model : :class:`pybamm.BaseModel`
+            The model for which to calculate initial conditions.
+        inputs_dict : dict
+            Any input parameters to pass to the model when solving
+        update_rhs : bool
+            Whether to update the rhs. True for 'solve', False for 'step'.
+
+        """
+
+        # set model.y0
         super()._set_initial_conditions(model, time, inputs_dict, update_rhs)
 
         casadi_format = model.convert_to_format == "casadi"
@@ -652,7 +635,6 @@ class IDAKLUSolver(pybamm.BaseSolver):
             inputs = inputs_dict
             y0S = None
 
-        # do this here cause y0 is set after set_up (calc consistent conditions)
         y0 = model.y0
         if isinstance(y0, casadi.DM):
             y0 = y0.full()
@@ -661,16 +643,15 @@ class IDAKLUSolver(pybamm.BaseSolver):
         ydot0 = np.zeros_like(y0)
         if model.mass_matrix_inv is not None:
             # calculate the time derivatives of the differential equations
-            rhs_alg0 = model.rhs_algebraic_eval(0.0, model.y0, inputs)
+            rhs_alg0 = model.rhs_algebraic_eval(time, model.y0, inputs)
             if casadi_format:
                 rhs_alg0 = rhs_alg0.full()
             rhs_alg0 = rhs_alg0.flatten()
 
             rhs0 = rhs_alg0[: model.len_rhs]
-            rhsdot0 = model.mass_matrix_inv.entries @ rhs0
 
-            # ydot0 = M^-1 * (rhs)
-            ydot0[: model.len_rhs] = rhsdot0
+            # for the differential terms, ydot = M^-1 * (rhs)
+            ydot0[: model.len_rhs] = model.mass_matrix_inv.entries @ rhs0
 
         sensitivity = casadi_format and (y0S is not None)
         if sensitivity:
@@ -691,6 +672,48 @@ class IDAKLUSolver(pybamm.BaseSolver):
         model.ydot0full = ydot0full
 
         return
+
+    def _process_output_variables(self, model, inputs_dict, sol, newsol):
+        """
+        Process the output variables and sensitivities and add them to the solution.
+
+        Parameters
+        ----------
+        model : :class:`pybamm.BaseModel`
+            The model that was solved
+        inputs_dict : dict
+
+        """
+        if not self.output_variables:
+            return
+
+        # Populate variables and sensititivies dictionaries directly
+        number_of_timesteps = sol.t.size
+        number_of_samples = sol.y.shape[0] // number_of_timesteps
+        sol.y = sol.y.reshape((number_of_timesteps, number_of_samples))
+        startk = 0
+        for var in self.output_variables:
+            output_var = model.variables_and_events[var]
+            # ExplicitTimeIntegral's are not computed as part of the solver and
+            # do not need to be converted
+            if isinstance(output_var, pybamm.ExplicitTimeIntegral):
+                continue
+            len_of_var = self._setup["var_casadi_fcns"][var](0, 0, 0).sparsity().nnz()
+            newsol._variables[var] = pybamm.ProcessedVariableComputed(
+                [output_var],
+                [self._setup["var_casadi_fcns"][var]],
+                [sol.y[:, startk : (startk + len_of_var)]],
+                newsol,
+            )
+            # Add sensitivities
+            newsol[var]._sensitivities = {}
+            if model.calculate_sensitivities:
+                for paramk, param in enumerate(inputs_dict.keys()):
+                    newsol[var].add_sensitivity(
+                        param,
+                        [sol.yS[:, startk : (startk + len_of_var), paramk]],
+                    )
+            startk += len_of_var
 
     def jaxify(
         self,

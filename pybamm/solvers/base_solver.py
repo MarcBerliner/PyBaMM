@@ -1215,17 +1215,14 @@ class BaseSolver:
             if not first_step_this_model:
                 # reset y0 to original initial conditions
                 self.set_up(model, model_inputs, ics_only=True)
+        elif old_solution.all_models[-1] == model:
+            # initialize with old solution
+            model.y0 = old_solution.all_ys[-1][:, -1]
         else:
-            if old_solution.all_models[-1] == model:
-                # initialize with old solution
-                model.y0 = old_solution.all_ys[-1][:, -1]
-            else:
-                _, concatenated_initial_conditions = model.set_initial_conditions_from(
-                    old_solution, return_type="ics"
-                )
-                model.y0 = concatenated_initial_conditions.evaluate(
-                    0, inputs=model_inputs
-                )
+            _, concatenated_initial_conditions = model.set_initial_conditions_from(
+                old_solution, return_type="ics"
+            )
+            model.y0 = concatenated_initial_conditions.evaluate(0, inputs=model_inputs)
 
         set_up_time = timer.time()
 
