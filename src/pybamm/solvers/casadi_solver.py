@@ -197,6 +197,7 @@ class CasadiSolver(pybamm.BaseSolver):
                 )
                 solution.solve_time = 0
                 solution.integration_time = 0
+                solution.initialization_time = 0
                 use_grid = False
             else:
                 solution = None
@@ -483,6 +484,14 @@ class CasadiSolver(pybamm.BaseSolver):
         solution.integration_time = (
             coarse_solution.integration_time + dense_step_sol.integration_time
         )
+
+        if (
+            coarse_solution.initialization_time is not None
+            and dense_step_sol.initialization_time is not None
+        ):
+            solution.initialization_time = (
+                coarse_solution.initialization_time + dense_step_sol.initialization_time
+            )
 
         solution.closest_event_idx = closest_event_idx
 

@@ -830,7 +830,12 @@ class BaseSolver:
             self._set_initial_conditions(model, t_eval[0], model_inputs_list[0])
 
         # Solve for the consistent initialization
+        initialization_time = timer.time()
+        timer.reset()
+
         self._set_consistent_initialization(model, t_eval[0], model_inputs_list[0])
+
+        self.initialization_time = initialization_time
 
         set_up_time = timer.time()
         timer.reset()
@@ -1179,7 +1184,12 @@ class BaseSolver:
         set_up_time = timer.time()
 
         # (Re-)calculate consistent initialization
+        initialization_time = timer.time()
+        timer.reset()
+
         self._set_consistent_initialization(model, t_start_shifted, model_inputs)
+
+        self.initialization_time = initialization_time
 
         # Check consistent initialization doesn't violate events
         self._check_events_with_initialization(t_eval, model, model_inputs)

@@ -114,6 +114,7 @@ class Solution:
         self.set_up_time = None
         self.solve_time = None
         self.integration_time = None
+        self.initialization_time = None
 
         # initialize empty variables and data
         self._variables = pybamm.FuzzyDict()
@@ -389,6 +390,7 @@ class Solution:
         new_sol.solve_time = 0
         new_sol.integration_time = 0
         new_sol.set_up_time = 0
+        new_sol.initialization_time = 0
 
         return new_sol
 
@@ -414,6 +416,7 @@ class Solution:
         new_sol.solve_time = 0
         new_sol.integration_time = 0
         new_sol.set_up_time = 0
+        new_sol.initialization_time = 0
 
         return new_sol
 
@@ -775,6 +778,13 @@ class Solution:
         # Set solution time
         new_sol.solve_time = self.solve_time + other.solve_time
         new_sol.integration_time = self.integration_time + other.integration_time
+        if (
+            self.initialization_time is not None
+            and other.initialization_time is not None
+        ):
+            new_sol.initialization_time = (
+                self.initialization_time + other.initialization_time
+            )
 
         # Set sub_solutions
         new_sol._sub_solutions = self.sub_solutions + other.sub_solutions
@@ -801,6 +811,7 @@ class Solution:
         new_sol.solve_time = self.solve_time
         new_sol.integration_time = self.integration_time
         new_sol.set_up_time = self.set_up_time
+        new_sol.initialization_time = self.initialization_time
 
         return new_sol
 
@@ -909,6 +920,7 @@ def make_cycle_solution(
     cycle_solution.solve_time = sum_sols.solve_time
     cycle_solution.integration_time = sum_sols.integration_time
     cycle_solution.set_up_time = sum_sols.set_up_time
+    cycle_solution.initialization_time = sum_sols.initialization_time
 
     cycle_solution.steps = step_solutions
 

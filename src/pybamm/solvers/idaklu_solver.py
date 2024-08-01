@@ -863,6 +863,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
         ):
             sol = self._setup["solver"].solve(
                 t_eval,
+                # np.array([t_eval[0], t_eval[-1]]),
                 y0full,
                 ydot0full,
                 inputs,
@@ -938,6 +939,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
             sensitivities=yS_out,
         )
         newsol.integration_time = integration_time
+        newsol.initialization_time = self.initialization_time
         if not self.output_variables:
             return newsol
 
