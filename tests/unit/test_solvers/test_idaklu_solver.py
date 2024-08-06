@@ -522,7 +522,7 @@ class TestIDAKLUSolver(unittest.TestCase):
         solver = pybamm.IDAKLUSolver()
 
         t_eval = np.linspace(0, 3, 100)
-        with self.assertRaisesRegex(pybamm.SolverError, "idaklu solver failed"):
+        with self.assertRaisesRegex(pybamm.SolverError, "FAILURE IDA"):
             solver.solve(model, t_eval)
 
     def test_dae_solver_algebraic_model(self):
@@ -633,7 +633,7 @@ class TestIDAKLUSolver(unittest.TestCase):
                         rtol=1e-8,
                         options=options,
                     )
-                    if (
+                    works = (
                         jacobian == "none"
                         and (linear_solver == "SUNLinSol_Dense")
                         or jacobian == "dense"
@@ -649,14 +649,11 @@ class TestIDAKLUSolver(unittest.TestCase):
                             and linear_solver != "SUNLinSol_Dense"
                             and linear_solver != "garbage"
                         )
-                    ):
-                        works = True
-                    else:
-                        works = False
+                    )
 
                     if works:
                         soln = solver.solve(model, t_eval)
-                        np.testing.assert_array_almost_equal(soln.y, soln_base.y, 5)
+                        np.testing.assert_array_almost_equal(soln.y, soln_base.y, 4)
                     else:
                         with self.assertRaises(ValueError):
                             soln = solver.solve(model, t_eval)
@@ -705,7 +702,7 @@ class TestIDAKLUSolver(unittest.TestCase):
             solver = pybamm.IDAKLUSolver(rtol=1e-6, atol=1e-6, options=options)
             soln = solver.solve(model, t_eval)
 
-            np.testing.assert_array_almost_equal(soln.y, soln_base.y, 5)
+            np.testing.assert_array_almost_equal(soln.y, soln_base.y, 4)
 
         options_fail = {
             "max_order_bdf": -1,

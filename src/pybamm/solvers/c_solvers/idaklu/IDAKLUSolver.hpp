@@ -28,6 +28,7 @@ public:
    */
   virtual Solution solve(
     np_array t_np,
+    np_array t_saveat_np,
     np_array y0_np,
     np_array yp0_np,
     np_array_dense inputs) = 0;

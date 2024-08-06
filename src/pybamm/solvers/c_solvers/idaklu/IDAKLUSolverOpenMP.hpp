@@ -124,6 +124,7 @@ public:
    */
   Solution solve(
     np_array t_np,
+    np_array t_saveat_np,
     np_array y0_np,
     np_array yp0_np,
     np_array_dense inputs) override;
@@ -152,6 +153,11 @@ public:
    * @brief Check the return flag for errors
    */
   void CheckErrors(int const & flag);
+
+  /**
+   * @brief Print the solver statistics
+   */
+  void PrintStats();
 };
 
 #include "IDAKLUSolverOpenMP.inl"

@@ -344,6 +344,7 @@ class Simulation:
     def solve(
         self,
         t_eval=None,
+        t_saveat=None,
         solver=None,
         save_at_cycles=None,
         calc_esoh=True,
@@ -687,13 +688,22 @@ class Simulation:
                         "start time": start_time,
                     }
                     # Make sure we take at least 2 timesteps
-                    npts = max(int(round(dt / step.period)) + 1, 2)
+                    if isinstance(self.solver, pybamm.IDAKLUSolver):
+                        # Ignore the period argument
+                        npts = 2
+                        t_eval = np.array([0, dt])
+                    else:
+                        npts = max(int(round(dt / step.period)) + 1, 2)
+                        t_eval = np.linspace(0, dt, npts)
+                    t_saveat = np.empty(0)
+
                     try:
                         step_solution = solver.step(
                             current_solution,
                             model,
                             dt,
-                            t_eval=np.linspace(0, dt, npts),
+                            t_eval,
+                            t_saveat=t_saveat,
                             save=False,
                             inputs=inputs,
                             **kwargs,

@@ -101,6 +101,7 @@ class BatchStudy:
     def solve(
         self,
         t_eval=None,
+        t_saveat=None,
         solver=None,
         save_at_cycles=None,
         calc_esoh=True,

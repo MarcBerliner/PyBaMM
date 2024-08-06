@@ -265,7 +265,7 @@ template <class ExprSet>
 void IDAKLUSolverOpenMP<ExprSet>::CalcVars(
     realtype *y_return,
     size_t length_of_return_vector,
-    size_t t_i,
+    size_t teval_i,
     realtype *tret,
     realtype *yval,
     const std::vector<realtype*>& ySval,
@@ -279,7 +279,7 @@ void IDAKLUSolverOpenMP<ExprSet>::CalcVars(
     (*var_fcn)({tret, yval, functions->inputs.data()}, {&res[0]});
     // store in return vector
     for (size_t jj=0; jj<var_fcn->nnz_out(); jj++) {
-      y_return[t_i*length_of_return_vector + j++] = res[jj];
+      y_return[teval_i*length_of_return_vector + j++] = res[jj];
     }
   }
   // calculate sensitivities
@@ -325,6 +325,7 @@ void IDAKLUSolverOpenMP<ExprSet>::CalcVarsSensitivities(
 template <class ExprSet>
 Solution IDAKLUSolverOpenMP<ExprSet>::solve(
     np_array t_np,
+    np_array t_saveat_np,
     np_array y0_np,
     np_array yp0_np,
     np_array_dense inputs
@@ -334,6 +335,7 @@ Solution IDAKLUSolverOpenMP<ExprSet>::solve(
 
   int number_of_timesteps = t_np.request().size;
   auto t = t_np.unchecked<1>();
+  auto t_saveat = t_saveat_np.unchecked<1>();
   realtype t0 = RCONST(t(0));
   auto y0 = y0_np.unchecked<1>();
   auto yp0 = yp0_np.unchecked<1>();
@@ -397,7 +399,8 @@ Solution IDAKLUSolverOpenMP<ExprSet>::solve(
   }
 
   realtype tret;
-  realtype t_final = t(number_of_timesteps - 1);
+  realtype tfinal = t(number_of_timesteps - 1);
+  realtype tprev = t0;
 
   // set return vectors
   int length_of_return_vector = 0;
@@ -429,9 +432,214 @@ Solution IDAKLUSolverOpenMP<ExprSet>::solve(
                                      length_of_return_vector];
   realtype *yterm_return = new realtype[length_of_final_sv_slice];
 
+  std::vector<std::vector<realtype>> y_adaptive(1, std::vector<realtype>(number_of_states, 0.0));
+  std::vector<realtype> t_adaptive(1, t(0));
+
   res.resize(max_res_size);
   res_dvar_dy.resize(max_res_dvar_dy);
   res_dvar_dp.resize(max_res_dvar_dp);
+
+  // Initial state (teval_i=0)
+  int teval_i = 0;
+  size_t ySk = 0;
+  t_return[teval_i] = t(teval_i);
+  if (functions->var_fcns.size() > 0) {
+    // Evaluate functions for each requested variable and store
+    CalcVars(y_return, length_of_return_vector, teval_i,
+             &tret, yval, ySval, yS_return, &ySk);
+  } else {
+    // Retain complete copy of the state vector
+    for (int j = 0; j < number_of_states; j++) {
+      y_return[j] = yval[j];
+      y_adaptive[0][j] = yval[j];
+    }
+    for (int j = 0; j < number_of_parameters; j++) {
+      const int base_index = j * number_of_timesteps * number_of_states;
+      for (int k = 0; k < number_of_states; k++) {
+        yS_return[base_index + k] = ySval[j][k];
+      }
+    }
+  }
+
+  // Subsequent states (teval_i>0)
+  teval_i += 1;
+  realtype t_next = t(teval_i);
+
+  realtype t_save;
+  int tsaveat_i = 0;
+  bool use_t_adaptive = t_saveat.size() == 0;
+  if (!use_t_adaptive) {
+    t_save = t_saveat(tsaveat_i);
+  }
+  bool print_debug = false;
+  IDASetStopTime(ida_mem, t_next);
+  int retval;
+  while (true) {
+    DEBUG("IDASolve");
+    retval = IDASolve(ida_mem, tfinal, &tret, yy, yp, IDA_ONE_STEP);
+
+    if (retval < 0) {
+      // failed
+      break;
+    } else if (tprev == tret) {
+      // IDA sometimes returns the same time point twice
+      // instead of erroring. Assign a retval and break
+      retval = IDA_ERR_FAIL;
+      break;
+    }
+
+    bool hit_final_time = tret >= tfinal;
+    if (print_debug) { py::print("DEBUG tprev =  ", tprev); }
+    if (print_debug) { py::print("DEBUG tret =   ", tret); }
+    if (print_debug) { py::print("DEBUG tsav_i = ", tsaveat_i); }
+
+    bool hit_saveat = !use_t_adaptive && t_save >= tprev;
+    bool hit_discontinuity = retval == IDA_TSTOP_RETURN;
+    bool hit_event = retval == IDA_ROOT_RETURN;
+
+    if (hit_saveat) {
+      // Save the state at the requested time
+      while (tsaveat_i <= (t_saveat.size()-1) && t_save <= tret) {
+        if (print_debug) { py::print("DEBUG saveat at t = ", t_save); }
+        if (print_debug) { py::print("DEBUG tret at t =   ", tret); }
+
+        if (t_save != t_next) {
+          CheckErrors(IDAGetDky(ida_mem, t_save, 0, yy));
+
+          t_adaptive.emplace_back(t_save);
+          y_adaptive.emplace_back(number_of_states, 0.0);
+          for (size_t j = 0; j < number_of_states; ++j) {
+            y_adaptive.back()[j] = yval[j];
+          }
+        }
+
+        tsaveat_i += 1;
+        if (tsaveat_i == (t_saveat.size())) {
+          // Reached the final t_saveat value
+          break;
+        }
+        t_save = t_saveat(tsaveat_i);
+      }
+    }
+
+    if (use_t_adaptive || hit_discontinuity || hit_event) {
+      if (hit_saveat) {
+        if (print_debug) { py::print("DEBUG IDAGetCurrentY"); }
+        CheckErrors(IDAGetDky(ida_mem, tret, 0, yy));
+      }
+
+      if (print_debug) { py::print("DEBUG tadapt at t =  ", tret); }
+      t_adaptive.emplace_back(tret);
+      y_adaptive.emplace_back(number_of_states, 0.0);
+      for (size_t j = 0; j < number_of_states; ++j) {
+        y_adaptive.back()[j] = yval[j];
+      }
+    }
+
+    if (sensitivity) {
+      CheckErrors(IDAGetSens(ida_mem, &tret, yyS));
+    }
+
+
+    if (hit_event || hit_discontinuity) {
+    // Evaluate and store results for the time step
+    if (print_debug) { py::print("DEBUG discon at t =  ", tret); }
+    t_return[teval_i] = tret;
+    if (functions->var_fcns.size() > 0) {
+      // Evaluate functions for each requested variable and store
+      // NOTE: Indexing of yS_return is (time:var:param)
+      CalcVars(y_return, length_of_return_vector, teval_i,
+                &tret, yval, ySval, yS_return, &ySk);
+    } else {
+      // Retain complete copy of the state vector
+      for (int j = 0; j < number_of_states; j++) {
+        y_return[teval_i * number_of_states + j] = yval[j];
+      }
+      for (int j = 0; j < number_of_parameters; j++) {
+        const int base_index =
+          j * number_of_timesteps * number_of_states +
+          teval_i * number_of_states;
+        for (int k = 0; k < number_of_states; k++) {
+          // NOTE: Indexing of yS_return is (time:param:yvec)
+          yS_return[base_index + k] = ySval[j][k];
+        }
+      }
+    }
+    if (hit_discontinuity && !hit_final_time) {
+      teval_i += 1;
+      // Reinitialize the solver to deal with the discontinuity
+      t_next = t(teval_i);
+      IDACalcIC(ida_mem, init_type, t_next);
+      CheckErrors(IDAReInit(ida_mem, tret, yy, yp));
+      if (sensitivity) {
+        CheckErrors(IDASensReInit(ida_mem, IDA_SIMULTANEOUS, yyS, ypS));
+      }
+      if (print_debug) { py::print("DEBUG Discontinuity at t = ", tret); }
+
+      CheckErrors(IDASetStopTime(ida_mem, t_next));
+    }
+    }
+
+    if (hit_final_time || retval == IDA_ROOT_RETURN) {
+      if (functions->var_fcns.size() > 0) {
+        // store final state slice if outout variables are specified
+        yterm_return = yval;
+      }
+      break;
+    }
+    tprev = tret;
+  }
+
+  // IDAGetDky(ida_mem, 0.0, 0, yy);
+  // for (size_t j = 0; j < number_of_states; ++j) {
+  //   py::print(yval[j]);
+  // }
+
+  if (solver_opts.print_stats) {
+    PrintStats();
+  }
+
+
+  // Hack for now to return the adaptive solution
+  realtype *t_return2 = new realtype[t_adaptive.size()];
+  for (size_t i = 0; i < t_adaptive.size(); i++) {
+    t_return2[i] = t_adaptive[i];
+  }
+  realtype *y_return2 = new realtype[t_adaptive.size() * number_of_states];
+  for (size_t i = 0; i < y_adaptive.size(); i++) {
+    for (size_t j = 0; j < number_of_states; j++) {
+      y_return2[i * number_of_states + j] = y_adaptive[i][j];
+    }
+  }
+
+  py::capsule free_t_when_done2(
+    t_return2,
+    [](void *f) {
+      realtype *vect = reinterpret_cast<realtype *>(f);
+      delete[] vect;
+    }
+  );
+  py::capsule free_y_when_done2(
+    y_return2,
+    [](void *f) {
+      realtype *vect = reinterpret_cast<realtype *>(f);
+      delete[] vect;
+    }
+  );
+
+  np_array t_ret2 = np_array(
+    t_adaptive.size(),
+    &t_return2[0],
+    free_t_when_done2
+  );
+  np_array y_ret2 = np_array(
+    t_adaptive.size() * number_of_states,
+    &y_return2[0],
+    free_y_when_done2
+  );
+
+
+
 
   py::capsule free_t_when_done(
     t_return,
@@ -462,87 +670,13 @@ Solution IDAKLUSolverOpenMP<ExprSet>::solve(
     }
   );
 
-  // Initial state (t_i=0)
-  int t_i = 0;
-  size_t ySk = 0;
-  t_return[t_i] = t(t_i);
-  if (functions->var_fcns.size() > 0) {
-    // Evaluate functions for each requested variable and store
-    CalcVars(y_return, length_of_return_vector, t_i,
-             &tret, yval, ySval, yS_return, &ySk);
-  } else {
-    // Retain complete copy of the state vector
-    for (int j = 0; j < number_of_states; j++) {
-      y_return[j] = yval[j];
-    }
-    for (int j = 0; j < number_of_parameters; j++) {
-      const int base_index = j * number_of_timesteps * number_of_states;
-      for (int k = 0; k < number_of_states; k++) {
-        yS_return[base_index + k] = ySval[j][k];
-      }
-    }
-  }
-
-  // Subsequent states (t_i>0)
-  int retval;
-  t_i = 1;
-  while (true) {
-    realtype t_next = t(t_i);
-    IDASetStopTime(ida_mem, t_next);
-    DEBUG("IDASolve");
-    retval = IDASolve(ida_mem, t_final, &tret, yy, yp, IDA_NORMAL);
-
-    if (!(retval == IDA_TSTOP_RETURN ||
-        retval == IDA_SUCCESS ||
-        retval == IDA_ROOT_RETURN)) {
-      // failed
-      break;
-    }
-
-    if (sensitivity) {
-      CheckErrors(IDAGetSens(ida_mem, &tret, yyS));
-    }
-
-    // Evaluate and store results for the time step
-    t_return[t_i] = tret;
-    if (functions->var_fcns.size() > 0) {
-      // Evaluate functions for each requested variable and store
-      // NOTE: Indexing of yS_return is (time:var:param)
-      CalcVars(y_return, length_of_return_vector, t_i,
-                &tret, yval, ySval, yS_return, &ySk);
-    } else {
-      // Retain complete copy of the state vector
-      for (int j = 0; j < number_of_states; j++) {
-        y_return[t_i * number_of_states + j] = yval[j];
-      }
-      for (int j = 0; j < number_of_parameters; j++) {
-        const int base_index =
-          j * number_of_timesteps * number_of_states +
-          t_i * number_of_states;
-        for (int k = 0; k < number_of_states; k++) {
-          // NOTE: Indexing of yS_return is (time:param:yvec)
-          yS_return[base_index + k] = ySval[j][k];
-        }
-      }
-    }
-    t_i += 1;
-
-    if (retval == IDA_SUCCESS || retval == IDA_ROOT_RETURN) {
-      if (functions->var_fcns.size() > 0) {
-        // store final state slice if outout variables are specified
-        yterm_return = yval;
-      }
-      break;
-    }
-  }
-
   np_array t_ret = np_array(
-    t_i,
+    teval_i,
     &t_return[0],
     free_t_when_done
   );
   np_array y_ret = np_array(
-    t_i * length_of_return_vector,
+    teval_i * length_of_return_vector,
     &y_return[0],
     free_y_when_done
   );
@@ -576,51 +710,8 @@ Solution IDAKLUSolverOpenMP<ExprSet>::solve(
     free_yterm_when_done
   );
 
-  Solution sol(retval, t_ret, y_ret, yS_ret, y_term);
-
-  if (solver_opts.print_stats) {
-    long nsteps, nrevals, nlinsetups, netfails;
-    int klast, kcur;
-    realtype hinused, hlast, hcur, tcur;
-
-    CheckErrors(IDAGetIntegratorStats(
-      ida_mem,
-      &nsteps,
-      &nrevals,
-      &nlinsetups,
-      &netfails,
-      &klast,
-      &kcur,
-      &hinused,
-      &hlast,
-      &hcur,
-      &tcur
-    ));
-
-    long nniters, nncfails;
-    CheckErrors(IDAGetNonlinSolvStats(ida_mem, &nniters, &nncfails));
-
-    long int ngevalsBBDP = 0;
-    if (setup_opts.using_iterative_solver) {
-      CheckErrors(IDABBDPrecGetNumGfnEvals(ida_mem, &ngevalsBBDP));
-    }
-
-    py::print("Solver Stats:");
-    py::print("\tNumber of steps =", nsteps);
-    py::print("\tNumber of calls to residual function =", nrevals);
-    py::print("\tNumber of calls to residual function in preconditioner =",
-              ngevalsBBDP);
-    py::print("\tNumber of linear solver setup calls =", nlinsetups);
-    py::print("\tNumber of error test failures =", netfails);
-    py::print("\tMethod order used on last step =", klast);
-    py::print("\tMethod order used on next step =", kcur);
-    py::print("\tInitial step size =", hinused);
-    py::print("\tStep size on last step =", hlast);
-    py::print("\tStep size on next step =", hcur);
-    py::print("\tCurrent internal time reached =", tcur);
-    py::print("\tNumber of nonlinear iterations performed =", nniters);
-    py::print("\tNumber of nonlinear convergence failures =", nncfails);
-  }
+  Solution sol(retval, t_ret2, y_ret2, yS_ret, y_term);
+  // Solution sol(retval, t_adaptive, y_adaptive, yS_ret, y_term);
 
   return sol;
 }
@@ -632,4 +723,49 @@ void IDAKLUSolverOpenMP<ExprSet>::CheckErrors(int const & flag) {
     py::set_error(PyExc_ValueError, message);
     throw py::error_already_set();
   }
+}
+
+template <class ExprSet>
+void IDAKLUSolverOpenMP<ExprSet>::PrintStats() {
+  long nsteps, nrevals, nlinsetups, netfails;
+  int klast, kcur;
+  realtype hinused, hlast, hcur, tcur;
+
+  CheckErrors(IDAGetIntegratorStats(
+    ida_mem,
+    &nsteps,
+    &nrevals,
+    &nlinsetups,
+    &netfails,
+    &klast,
+    &kcur,
+    &hinused,
+    &hlast,
+    &hcur,
+    &tcur
+  ));
+
+  long nniters, nncfails;
+  CheckErrors(IDAGetNonlinSolvStats(ida_mem, &nniters, &nncfails));
+
+  long int ngevalsBBDP = 0;
+  if (setup_opts.using_iterative_solver) {
+    CheckErrors(IDABBDPrecGetNumGfnEvals(ida_mem, &ngevalsBBDP));
+  }
+
+  py::print("Solver Stats:");
+  py::print("\tNumber of steps =", nsteps);
+  py::print("\tNumber of calls to residual function =", nrevals);
+  py::print("\tNumber of calls to residual function in preconditioner =",
+            ngevalsBBDP);
+  py::print("\tNumber of linear solver setup calls =", nlinsetups);
+  py::print("\tNumber of error test failures =", netfails);
+  py::print("\tMethod order used on last step =", klast);
+  py::print("\tMethod order used on next step =", kcur);
+  py::print("\tInitial step size =", hinused);
+  py::print("\tStep size on last step =", hlast);
+  py::print("\tStep size on next step =", hcur);
+  py::print("\tCurrent internal time reached =", tcur);
+  py::print("\tNumber of nonlinear iterations performed =", nniters);
+  py::print("\tNumber of nonlinear convergence failures =", nncfails);
 }

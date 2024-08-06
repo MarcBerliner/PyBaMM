@@ -661,6 +661,7 @@ class BaseSolver:
         self,
         model,
         t_eval=None,
+        t_saveat=None,
         inputs=None,
         nproc=None,
         calculate_sensitivities=False,
@@ -1055,6 +1056,7 @@ class BaseSolver:
         model,
         dt,
         t_eval=None,
+        t_saveat=None,
         npts=None,
         inputs=None,
         save=True,
@@ -1077,6 +1079,7 @@ class BaseSolver:
             An array of times at which to return the solution during the step
             (Note: t_eval is the time measured from the start of the step, so should start at 0 and end at dt).
             By default, the solution is returned at t0 and t0 + dt.
+        t_saveat
         npts : deprecated
         inputs : dict, optional
             Any input parameters to pass to the model when solving

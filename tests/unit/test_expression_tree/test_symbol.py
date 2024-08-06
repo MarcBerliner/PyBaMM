@@ -12,6 +12,7 @@ import re
 import pybamm
 from pybamm.expression_tree.binary_operators import _Heaviside
 import sympy
+import importlib.util
 
 
 class TestSymbol:
@@ -391,6 +392,10 @@ class TestSymbol:
             pybamm.grad(c).__repr__(),
         )
 
+    @unittest.skipIf(
+        importlib.util.find_spec("graphviz") is None,
+        "The graphviz package is not installed",
+    )
     def test_symbol_visualise(self):
         with TemporaryDirectory() as dir_name:
             test_stub = os.path.join(dir_name, "test_visualize")
