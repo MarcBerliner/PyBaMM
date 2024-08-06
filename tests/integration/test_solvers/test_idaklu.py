@@ -31,13 +31,15 @@ class TestIDAKLUSolver:
         mesh = pybamm.Mesh(geometry, model.default_submesh_types, model.default_var_pts)
         disc = pybamm.Discretisation(mesh, model.default_spatial_methods)
         disc.process_model(model)
-        t_eval = np.linspace(0, 3500, 100)
+        t_eval = np.array([0, 3500])
+        t_interp = np.linspace(t_eval[0], t_eval[-1], 100)
         solver = pybamm.IDAKLUSolver(rtol=1e-10, atol=1e-10)
         solution = solver.solve(
             model,
             t_eval,
             inputs=inputs,
             calculate_sensitivities=True,
+            t_interp=t_interp,
         )
         np.testing.assert_array_less(1, solution.t.size)
 
@@ -47,10 +49,10 @@ class TestIDAKLUSolver:
         # evaluate the sensitivities using finite difference
         h = 1e-5
         sol_plus = solver.solve(
-            model, t_eval, inputs={param_name: param_value + 0.5 * h}
+            model, t_eval, inputs={param_name: param_value + 0.5 * h}, t_interp=t_interp
         )
         sol_neg = solver.solve(
-            model, t_eval, inputs={param_name: param_value - 0.5 * h}
+            model, t_eval, inputs={param_name: param_value - 0.5 * h}, t_interp=t_interp
         )
         dyda_fd = (sol_plus.y - sol_neg.y) / h
         dyda_fd = dyda_fd.transpose().reshape(-1, 1)

@@ -133,7 +133,7 @@ class CasadiSolver(pybamm.BaseSolver):
 
         pybamm.citations.register("Andersson2019")
 
-    def _integrate(self, model, t_eval, inputs_dict=None, t_saveat=None):
+    def _integrate(self, model, t_eval, inputs_dict=None, t_interp=None):
         """
         Solve a DAE model defined by residuals with initial conditions y0.
 
@@ -197,7 +197,6 @@ class CasadiSolver(pybamm.BaseSolver):
                 )
                 solution.solve_time = 0
                 solution.integration_time = 0
-                solution.initialization_time = 0
                 use_grid = False
             else:
                 solution = None
@@ -484,14 +483,6 @@ class CasadiSolver(pybamm.BaseSolver):
         solution.integration_time = (
             coarse_solution.integration_time + dense_step_sol.integration_time
         )
-
-        if (
-            coarse_solution.initialization_time is not None
-            and dense_step_sol.initialization_time is not None
-        ):
-            solution.initialization_time = (
-                coarse_solution.initialization_time + dense_step_sol.initialization_time
-            )
 
         solution.closest_event_idx = closest_event_idx
 

@@ -65,6 +65,7 @@ class BaseSolver:
         self.name = "Base solver"
         self.ode_solver = False
         self.algebraic_solver = False
+        self.supports_interp = False
         self._on_extrapolation = "warn"
         self.computed_var_fcns = {}
         self._mp_context = self.get_platform_context(platform.system())
@@ -661,10 +662,10 @@ class BaseSolver:
         self,
         model,
         t_eval=None,
-        t_saveat=None,
         inputs=None,
         nproc=None,
         calculate_sensitivities=False,
+        t_interp=None,
     ):
         """
         Execute the solver setup and calculate the solution of the model at
@@ -831,12 +832,7 @@ class BaseSolver:
             self._set_initial_conditions(model, t_eval[0], model_inputs_list[0])
 
         # Solve for the consistent initialization
-        initialization_time = timer.time()
-        timer.reset()
-
         self._set_consistent_initialization(model, t_eval[0], model_inputs_list[0])
-
-        self.initialization_time = initialization_time
 
         set_up_time = timer.time()
         timer.reset()
@@ -866,6 +862,7 @@ class BaseSolver:
                     model,
                     t_eval[start_index:end_index],
                     model_inputs_list[0],
+                    t_interp=t_interp,
                 )
                 new_solutions = [new_solution]
             elif model.convert_to_format == "jax":
@@ -874,6 +871,7 @@ class BaseSolver:
                     model,
                     t_eval[start_index:end_index],
                     model_inputs_list,
+                    t_interp,
                 )
             else:
                 with mp.get_context(self._mp_context).Pool(processes=nproc) as p:
@@ -883,6 +881,7 @@ class BaseSolver:
                             [model] * ninputs,
                             [t_eval[start_index:end_index]] * ninputs,
                             model_inputs_list,
+                            [t_interp] * ninputs,
                         ),
                     )
                     p.close()
@@ -1056,10 +1055,10 @@ class BaseSolver:
         model,
         dt,
         t_eval=None,
-        t_saveat=None,
         npts=None,
         inputs=None,
         save=True,
+        t_interp=None,
     ):
         """
         Step the solution of the model forward by a given time increment. The
@@ -1079,7 +1078,7 @@ class BaseSolver:
             An array of times at which to return the solution during the step
             (Note: t_eval is the time measured from the start of the step, so should start at 0 and end at dt).
             By default, the solution is returned at t0 and t0 + dt.
-        t_saveat
+        t_interp
         npts : deprecated
         inputs : dict, optional
             Any input parameters to pass to the model when solving
@@ -1131,8 +1130,12 @@ class BaseSolver:
         else:
             pass
 
+        if t_interp is None:
+            t_interp = np.empty(0)
+
         t_start = old_solution.t[-1]
         t_eval = t_start + t_eval
+        t_interp = t_start + t_interp
         t_end = t_start + dt
 
         if t_start == 0:
@@ -1144,6 +1147,8 @@ class BaseSolver:
             # the start of the next step
             t_start_shifted = t_start + step_start_offset
             t_eval[0] = t_start_shifted
+            if t_interp.size > 0:
+                t_interp[0] = t_start_shifted
 
         # Set timer
         timer = pybamm.Timer()
@@ -1187,12 +1192,7 @@ class BaseSolver:
         set_up_time = timer.time()
 
         # (Re-)calculate consistent initialization
-        initialization_time = timer.time()
-        timer.reset()
-
         self._set_consistent_initialization(model, t_start_shifted, model_inputs)
-
-        self.initialization_time = initialization_time
 
         # Check consistent initialization doesn't violate events
         self._check_events_with_initialization(t_eval, model, model_inputs)
@@ -1200,7 +1200,7 @@ class BaseSolver:
         # Step
         pybamm.logger.verbose(f"Stepping for {t_start_shifted:.0f} < t < {t_end:.0f}")
         timer.reset()
-        solution = self._integrate(model, t_eval, model_inputs)
+        solution = self._integrate(model, t_eval, model_inputs, t_interp)
         solution.solve_time = timer.time()
 
         # Check if extrapolation occurred

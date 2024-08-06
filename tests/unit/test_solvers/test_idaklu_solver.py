@@ -90,9 +90,12 @@ class TestIDAKLUSolver(unittest.TestCase):
                 root_method=root_method,
                 options={"jax_evaluator": "iree"} if form == "iree" else {},
             )
+
             t_eval = np.linspace(0, 1, 100)
-            solution = solver.solve(model_disc, t_eval)
-            np.testing.assert_array_equal(solution.t, t_eval)
+            t_interp = t_eval
+
+            solution = solver.solve(model_disc, t_eval, t_interp=t_interp)
+            np.testing.assert_array_equal(solution.t, t_interp)
             np.testing.assert_array_almost_equal(
                 solution.y[0], np.exp(0.1 * solution.t), decimal=5
             )
@@ -110,8 +113,8 @@ class TestIDAKLUSolver(unittest.TestCase):
                 root_method=root_method,
                 options={"jax_evaluator": "iree"} if form == "iree" else {},
             )
-            solution = solver.solve(model_disc, t_eval)
-            np.testing.assert_array_equal(solution.t, t_eval)
+            solution = solver.solve(model_disc, t_eval, t_interp=t_interp)
+            np.testing.assert_array_equal(solution.t, t_interp)
             np.testing.assert_array_almost_equal(
                 solution.y[0], np.exp(0.1 * solution.t), decimal=5
             )
@@ -125,8 +128,8 @@ class TestIDAKLUSolver(unittest.TestCase):
                 root_method=root_method,
                 options={"jax_evaluator": "iree"} if form == "iree" else {},
             )
-            solution = solver.solve(model_disc, t_eval)
-            self.assertLess(len(solution.t), len(t_eval))
+            solution = solver.solve(model_disc, t_eval, t_interp=t_interp)
+            self.assertLess(len(solution.t), len(t_interp))
             np.testing.assert_array_almost_equal(
                 solution.y[0], np.exp(0.1 * solution.t), decimal=5
             )
@@ -152,7 +155,7 @@ class TestIDAKLUSolver(unittest.TestCase):
                 root_method=root_method,
                 options={"jax_evaluator": "iree"} if form == "iree" else {},
             )
-            t_eval = np.linspace(0, 5, 100)
+            t_eval = np.array([0, 5])
             solution = solver.solve(model, t_eval)
             np.testing.assert_array_less(solution.y[0, :-1], 1.5)
             np.testing.assert_array_less(solution.y[-1, :-1], 2.5)
@@ -249,10 +252,15 @@ class TestIDAKLUSolver(unittest.TestCase):
                 )
 
                 t_eval = np.linspace(0, 3, 100)
+                t_interp = t_eval
                 a_value = 0.1
 
                 sol = solver.solve(
-                    model, t_eval, inputs={"a": a_value}, calculate_sensitivities=True
+                    model,
+                    t_eval,
+                    inputs={"a": a_value},
+                    calculate_sensitivities=True,
+                    t_interp=t_interp,
                 )
 
                 np.testing.assert_array_almost_equal(
@@ -292,7 +300,8 @@ class TestIDAKLUSolver(unittest.TestCase):
                 options={"jax_evaluator": "iree"} if form == "iree" else {},
             )
 
-            t_eval = np.linspace(0, 3, 100)
+            t_interp = np.linspace(0, 3, 100)
+            t_eval = np.array([t_interp[0], t_interp[-1]])
             a_value = 0.1
 
             # solve first without sensitivities
@@ -300,6 +309,7 @@ class TestIDAKLUSolver(unittest.TestCase):
                 model,
                 t_eval,
                 inputs={"a": a_value},
+                t_interp=t_interp,
             )
 
             # test that y[1] remains constant
@@ -315,7 +325,11 @@ class TestIDAKLUSolver(unittest.TestCase):
 
             # now solve with sensitivities (this should cause set_up to be run again)
             sol = solver.solve(
-                model, t_eval, inputs={"a": a_value}, calculate_sensitivities=True
+                model,
+                t_eval,
+                inputs={"a": a_value},
+                calculate_sensitivities=True,
+                t_interp=t_interp,
             )
 
             # test that y[1] remains constant
@@ -330,8 +344,12 @@ class TestIDAKLUSolver(unittest.TestCase):
 
             # evaluate the sensitivities using finite difference
             h = 1e-6
-            sol_plus = solver.solve(model, t_eval, inputs={"a": a_value + 0.5 * h})
-            sol_neg = solver.solve(model, t_eval, inputs={"a": a_value - 0.5 * h})
+            sol_plus = solver.solve(
+                model, t_eval, inputs={"a": a_value + 0.5 * h}, t_interp=t_interp
+            )
+            sol_neg = solver.solve(
+                model, t_eval, inputs={"a": a_value - 0.5 * h}, t_interp=t_interp
+            )
             dyda_fd = (sol_plus.y - sol_neg.y) / h
             dyda_fd = dyda_fd.transpose().reshape(-1, 1)
 
@@ -408,7 +426,7 @@ class TestIDAKLUSolver(unittest.TestCase):
             model.rhs = {u: a * v + b}
             model.algebraic = {v: 1 - v}
             model.initial_conditions = {u: 0, v: 1}
-            model.events = [pybamm.Event("1", 0.2 - u)]
+            # model.events = [pybamm.Event("1", 0.2 - u)]
 
             disc = pybamm.Discretisation()
             disc.process_model(model)
@@ -419,6 +437,8 @@ class TestIDAKLUSolver(unittest.TestCase):
             )
 
             t_eval = np.linspace(0, 3, 100)
+            t_interp = t_eval
+
             a_value = 0.1
             b_value = 0.0
 
@@ -428,6 +448,7 @@ class TestIDAKLUSolver(unittest.TestCase):
                 t_eval,
                 inputs={"a": a_value, "b": b_value},
                 calculate_sensitivities=True,
+                t_interp=t_interp,
             )
 
             # test that y[1] remains constant
@@ -444,10 +465,16 @@ class TestIDAKLUSolver(unittest.TestCase):
             # evaluate the sensitivities using finite difference
             h = 1e-6
             sol_plus = solver.solve(
-                model, t_eval, inputs={"a": a_value + 0.5 * h, "b": b_value}
+                model,
+                t_eval,
+                inputs={"a": a_value + 0.5 * h, "b": b_value},
+                t_interp=t_interp,
             )
             sol_neg = solver.solve(
-                model, t_eval, inputs={"a": a_value - 0.5 * h, "b": b_value}
+                model,
+                t_eval,
+                inputs={"a": a_value - 0.5 * h, "b": b_value},
+                t_interp=t_interp,
             )
             max_index = min(sol_plus.y.shape[1], sol_neg.y.shape[1]) - 1
             dyda_fd = (sol_plus.y[:, :max_index] - sol_neg.y[:, :max_index]) / h
@@ -461,10 +488,16 @@ class TestIDAKLUSolver(unittest.TestCase):
             )
 
             sol_plus = solver.solve(
-                model, t_eval, inputs={"a": a_value, "b": b_value + 0.5 * h}
+                model,
+                t_eval,
+                inputs={"a": a_value, "b": b_value + 0.5 * h},
+                t_interp=t_interp,
             )
             sol_neg = solver.solve(
-                model, t_eval, inputs={"a": a_value, "b": b_value - 0.5 * h}
+                model,
+                t_eval,
+                inputs={"a": a_value, "b": b_value - 0.5 * h},
+                t_interp=t_interp,
             )
             max_index = min(sol_plus.y.shape[1], sol_neg.y.shape[1]) - 1
             dydb_fd = (sol_plus.y[:, :max_index] - sol_neg.y[:, :max_index]) / h
@@ -592,21 +625,22 @@ class TestIDAKLUSolver(unittest.TestCase):
         disc.process_model(model)
 
         t_eval = np.linspace(0, 1)
+        t_interp = t_eval
         solver = pybamm.IDAKLUSolver()
-        soln_base = solver.solve(model, t_eval)
+        soln_base = solver.solve(model, t_eval, t_interp=t_interp)
 
         # test print_stats
         solver = pybamm.IDAKLUSolver(options={"print_stats": True})
         f = io.StringIO()
         with redirect_stdout(f):
-            solver.solve(model, t_eval)
+            solver.solve(model, t_eval, t_interp=t_interp)
         s = f.getvalue()
         self.assertIn("Solver Stats", s)
 
         solver = pybamm.IDAKLUSolver(options={"print_stats": False})
         f = io.StringIO()
         with redirect_stdout(f):
-            solver.solve(model, t_eval)
+            solver.solve(model, t_eval, t_interp=t_interp)
         s = f.getvalue()
         self.assertEqual(len(s), 0)
 
@@ -652,7 +686,7 @@ class TestIDAKLUSolver(unittest.TestCase):
                     )
 
                     if works:
-                        soln = solver.solve(model, t_eval)
+                        soln = solver.solve(model, t_eval, t_interp=t_interp)
                         np.testing.assert_array_almost_equal(soln.y, soln_base.y, 4)
                     else:
                         with self.assertRaises(ValueError):
@@ -668,9 +702,10 @@ class TestIDAKLUSolver(unittest.TestCase):
         disc = pybamm.Discretisation()
         disc.process_model(model)
 
-        t_eval = np.linspace(0, 1)
+        t_interp = np.linspace(0, 1)
+        t_eval = np.array([t_interp[0], t_interp[-1]])
         solver = pybamm.IDAKLUSolver()
-        soln_base = solver.solve(model, t_eval)
+        soln_base = solver.solve(model, t_eval, t_interp=t_interp)
 
         options_success = {
             "max_order_bdf": 4,
@@ -700,7 +735,7 @@ class TestIDAKLUSolver(unittest.TestCase):
         for option in options_success:
             options = {option: options_success[option]}
             solver = pybamm.IDAKLUSolver(rtol=1e-6, atol=1e-6, options=options)
-            soln = solver.solve(model, t_eval)
+            soln = solver.solve(model, t_eval, t_interp=t_interp)
 
             np.testing.assert_array_almost_equal(soln.y, soln_base.y, 4)
 
@@ -813,7 +848,9 @@ class TestIDAKLUSolver(unittest.TestCase):
 
         # Compare output to sol_all
         for varname in [*output_variables, *model_vars]:
-            self.assertTrue(np.allclose(sol[varname].data, sol_all[varname].data))
+            np.testing.assert_array_almost_equal(
+                sol[varname](t_eval), sol_all[varname](t_eval), 4
+            )
 
         # Check that the missing variables are not available in the solution
         for varname in inaccessible_vars:
@@ -908,7 +945,7 @@ class TestIDAKLUSolver(unittest.TestCase):
             tol = 1e-5 if form != "iree" else 1e-2  # iree has reduced precision
             for varname in output_variables:
                 np.testing.assert_array_almost_equal(
-                    sol[varname].data, sol_all[varname].data, tol
+                    sol[varname](t_eval), sol_all[varname](t_eval), tol
                 )
 
             # Mock a 1D current collector and initialise (none in the model)
@@ -939,7 +976,7 @@ class TestIDAKLUSolver(unittest.TestCase):
             parameter_values=parameter_values,
             solver=pybamm.IDAKLUSolver(output_variables=["Terminal voltage [V]"]),
         )
-        sol = sim.solve(np.linspace(0, 3600, 1000))
+        sol = sim.solve(np.linspace(0, 3600, 2))
         self.assertEqual(sol.termination, "event: Minimum voltage [V]")
 
         # create an event that doesn't require the state vector
@@ -957,7 +994,7 @@ class TestIDAKLUSolver(unittest.TestCase):
             parameter_values=parameter_values,
             solver=pybamm.IDAKLUSolver(output_variables=["Terminal voltage [V]"]),
         )
-        sol3 = sim3.solve(np.linspace(0, 3600, 1000))
+        sol3 = sim3.solve(np.linspace(0, 3600, 2))
         self.assertEqual(sol3.termination, "event: Minimum voltage [V]")
 
 

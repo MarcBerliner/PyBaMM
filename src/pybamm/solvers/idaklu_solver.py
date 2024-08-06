@@ -233,6 +233,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
             output_variables,
         )
         self.name = "IDA KLU solver"
+        self.supports_interp = True
 
         pybamm.citations.register("Hindmarsh2000")
         pybamm.citations.register("Hindmarsh2005")
@@ -829,7 +830,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
     def _demote_64_to_32(self, x: pybamm.EvaluatorJax):
         return pybamm.EvaluatorJax._demote_64_to_32(x)
 
-    def _integrate(self, model, t_eval, inputs_dict=None, t_saveat=None):
+    def _integrate(self, model, t_eval, inputs_dict=None, t_interp=None):
         """
         Solve a DAE model defined by residuals with initial conditions y0.
 
@@ -850,8 +851,8 @@ class IDAKLUSolver(pybamm.BaseSolver):
         else:
             inputs = np.array([[]])
 
-        if t_saveat is None:
-            t_saveat = np.empty(0)
+        if t_interp is None:
+            t_interp = np.empty(0)
 
         y0full = model.y0full
         ydot0full = model.ydot0full
@@ -865,14 +866,9 @@ class IDAKLUSolver(pybamm.BaseSolver):
             model.convert_to_format == "jax"
             and self._options["jax_evaluator"] == "iree"
         ):
-            # t_discontinuity = np.array([t_eval[0], t_eval[-1]])
-
-            # t_saveat = np.setdiff1d(t_eval, t_discontinuity)
-            t_saveat = np.setdiff1d(t_saveat, t_eval)
-
             sol = self._setup["solver"].solve(
                 t_eval,
-                t_saveat,
+                t_interp,
                 y0full,
                 ydot0full,
                 inputs,
@@ -952,7 +948,6 @@ class IDAKLUSolver(pybamm.BaseSolver):
             sensitivities=yS_out,
         )
         newsol.integration_time = integration_time
-        newsol.initialization_time = self.initialization_time
         if not self.output_variables:
             # print((newsol.y).shape)
             return newsol
@@ -1154,6 +1149,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
         *,
         output_variables=None,
         calculate_sensitivities=True,
+        t_interp=None,
     ):
         """JAXify the solver object
 
@@ -1178,6 +1174,7 @@ class IDAKLUSolver(pybamm.BaseSolver):
             t_eval,
             output_variables=output_variables,
             calculate_sensitivities=calculate_sensitivities,
+            t_interp=t_interp,
         )
         return obj
 
