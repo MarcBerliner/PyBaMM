@@ -689,6 +689,9 @@ class BaseSolver:
             Whether the solver calculates sensitivities of all input parameters. Defaults to False.
             If only a subset of sensitivities are required, can also pass a
             list of input parameter names
+        t_interp : None, list or ndarray, optional
+            The times (in seconds) at which to interpolate the solution. Defaults to None.
+            Only valid for solvers that support intra-solve interpolation (`IDAKLUSolver`).
 
         Returns
         -------
@@ -737,8 +740,10 @@ class BaseSolver:
                     "initial time and tf is the final time, but has been provided "
                     f"as a list of length {len(t_eval)}."
                 )
-            else:
+            elif not self.supports_interp:
                 t_eval = np.linspace(t_eval[0], t_eval[-1], 100)
+            else:
+                t_eval = np.array(t_eval)
 
         # Make sure t_eval is monotonic
         if (np.diff(t_eval) < 0).any():
@@ -1084,6 +1089,9 @@ class BaseSolver:
             Any input parameters to pass to the model when solving
         save : bool, optional
             Save solution with all previous timesteps. Defaults to True.
+        t_interp : None, list or ndarray, optional
+            The times (in seconds) at which to interpolate the solution. Defaults to None.
+            Only valid for solvers that support intra-solve interpolation (`IDAKLUSolver`).
         Raises
         ------
         :class:`pybamm.ModelError`
@@ -1129,6 +1137,14 @@ class BaseSolver:
             )
         else:
             pass
+
+        if not self.supports_interp and (t_interp is not None and len(t_interp) != 0):
+            warnings.warn(
+                f"Explicit interpolation times not implemented for {self.name}",
+                pybamm.SolverWarning,
+                stacklevel=2,
+            )
+            t_interp = np.empty(0)
 
         if t_interp is None:
             t_interp = np.empty(0)

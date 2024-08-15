@@ -6,7 +6,6 @@ import numpy as np
 from datetime import datetime
 from .step_termination import _read_termination
 import numbers
-import warnings
 
 _examples = """
 
@@ -294,11 +293,11 @@ class BaseStep:
             The time points at which to interpolate the solution
         """
         if solver.supports_interp:
-            return self._setup_timestepping(solver, tf, t_interp)
+            return self._setup_timestepping(tf, t_interp)
         else:
-            return self._setup_timestepping_dense_t_eval(solver, tf, t_interp)
+            return self._setup_timestepping_dense_t_eval(tf, t_interp)
 
-    def _setup_timestepping(self, solver, tf, t_interp):
+    def _setup_timestepping(self, tf, t_interp):
         """
         Setup timestepping for the model. This returns a t_eval vector that stops
         only at the first and last time points. If t_interp and the period are
@@ -321,9 +320,13 @@ class BaseStep:
                 t_interp = self.default_time_vector(tf)
             else:
                 t_interp = np.empty(0)
+
+        if not isinstance(t_interp, np.ndarray):
+            t_interp = np.array(t_interp)
+
         return t_eval, t_interp
 
-    def _setup_timestepping_dense_t_eval(self, solver, tf, t_interp):
+    def _setup_timestepping_dense_t_eval(self, tf, t_interp):
         """
         Setup timestepping for the model. By default, this returns a dense t_eval which
         stops the solver at each point in the t_eval vector. This method is for solvers
@@ -338,13 +341,6 @@ class BaseStep:
         t_interp: np.array | None
             The time points at which to interpolate the solution
         """
-        if not solver.supports_interp:
-            warnings.warn(
-                f"Explicit interpolation times not implemented for {solver.name}",
-                pybamm.SolverWarning,
-                stacklevel=2,
-            )
-
         t_eval = self.default_time_vector(tf)
 
         if t_interp is None:

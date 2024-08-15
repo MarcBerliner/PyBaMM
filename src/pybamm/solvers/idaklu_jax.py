@@ -569,6 +569,9 @@ class IDAKLUJax:
             The variables to be returned. If None, the variables in the model are used.
         calculate_sensitivities : bool, optional
             Whether to calculate sensitivities. Default is True.
+        t_interp : None, list or ndarray, optional
+            The times (in seconds) at which to interpolate the solution. Defaults to None.
+            Only valid for solvers that support intra-solve interpolation (`IDAKLUSolver`).
         """
         if self.jaxpr is not None:
             warnings.warn(

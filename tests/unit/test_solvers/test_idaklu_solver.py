@@ -97,7 +97,10 @@ class TestIDAKLUSolver(unittest.TestCase):
             solution = solver.solve(model_disc, t_eval, t_interp=t_interp)
             np.testing.assert_array_equal(solution.t, t_interp)
             np.testing.assert_array_almost_equal(
-                solution.y[0], np.exp(0.1 * solution.t), decimal=5
+                solution.y[0],
+                np.exp(0.1 * solution.t),
+                decimal=5,
+                err_msg=f"Failed for form {form}",
             )
 
             # Check invalid atol type raises an error
@@ -116,7 +119,10 @@ class TestIDAKLUSolver(unittest.TestCase):
             solution = solver.solve(model_disc, t_eval, t_interp=t_interp)
             np.testing.assert_array_equal(solution.t, t_interp)
             np.testing.assert_array_almost_equal(
-                solution.y[0], np.exp(0.1 * solution.t), decimal=5
+                solution.y[0],
+                np.exp(0.1 * solution.t),
+                decimal=5,
+                err_msg=f"Failed for form {form}",
             )
 
             # enforce events that will be triggered
@@ -131,7 +137,10 @@ class TestIDAKLUSolver(unittest.TestCase):
             solution = solver.solve(model_disc, t_eval, t_interp=t_interp)
             self.assertLess(len(solution.t), len(t_interp))
             np.testing.assert_array_almost_equal(
-                solution.y[0], np.exp(0.1 * solution.t), decimal=5
+                solution.y[0],
+                np.exp(0.1 * solution.t),
+                decimal=5,
+                err_msg=f"Failed for form {form}",
             )
 
             # bigger dae model with multiple events
@@ -162,10 +171,16 @@ class TestIDAKLUSolver(unittest.TestCase):
             np.testing.assert_equal(solution.t_event[0], solution.t[-1])
             np.testing.assert_array_equal(solution.y_event[:, 0], solution.y[:, -1])
             np.testing.assert_array_almost_equal(
-                solution.y[0], np.exp(0.1 * solution.t), decimal=5
+                solution.y[0],
+                np.exp(0.1 * solution.t),
+                decimal=5,
+                err_msg=f"Failed for form {form}",
             )
             np.testing.assert_array_almost_equal(
-                solution.y[-1], 2 * np.exp(0.1 * solution.t), decimal=5
+                solution.y[-1],
+                2 * np.exp(0.1 * solution.t),
+                decimal=5,
+                err_msg=f"Failed for form {form}",
             )
 
     def test_input_params(self):
@@ -210,15 +225,21 @@ class TestIDAKLUSolver(unittest.TestCase):
             )
 
             # test that y[3] remains constant
-            np.testing.assert_array_almost_equal(sol.y[3], np.ones(sol.t.shape))
+            np.testing.assert_array_almost_equal(
+                sol.y[3], np.ones(sol.t.shape), err_msg=f"Failed for form {form}"
+            )
 
             # test that y[0] = to true solution
             true_solution = a_value * sol.t
-            np.testing.assert_array_almost_equal(sol.y[0], true_solution)
+            np.testing.assert_array_almost_equal(
+                sol.y[0], true_solution, err_msg=f"Failed for form {form}"
+            )
 
             # test that y[1:3] = to true solution
             true_solution = b_value * sol.t
-            np.testing.assert_array_almost_equal(sol.y[1:3], true_solution)
+            np.testing.assert_array_almost_equal(
+                sol.y[1:3], true_solution, err_msg=f"Failed for form {form}"
+            )
 
     def test_sensitivities_initial_condition(self):
         for form in ["casadi", "iree"]:
@@ -267,6 +288,7 @@ class TestIDAKLUSolver(unittest.TestCase):
                     sol["2v"].sensitivities["a"].full().flatten(),
                     np.exp(-sol.t) * 2,
                     decimal=4,
+                    err_msg=f"Failed for form {form}",
                 )
 
     def test_ida_roberts_klu_sensitivities(self):
@@ -313,11 +335,15 @@ class TestIDAKLUSolver(unittest.TestCase):
             )
 
             # test that y[1] remains constant
-            np.testing.assert_array_almost_equal(sol.y[1, :], np.ones(sol.t.shape))
+            np.testing.assert_array_almost_equal(
+                sol.y[1, :], np.ones(sol.t.shape), err_msg=f"Failed for form {form}"
+            )
 
             # test that y[0] = to true solution
             true_solution = a_value * sol.t
-            np.testing.assert_array_almost_equal(sol.y[0, :], true_solution)
+            np.testing.assert_array_almost_equal(
+                sol.y[0, :], true_solution, err_msg=f"Failed for form {form}"
+            )
 
             # should be no sensitivities calculated
             with self.assertRaises(KeyError):
@@ -333,11 +359,15 @@ class TestIDAKLUSolver(unittest.TestCase):
             )
 
             # test that y[1] remains constant
-            np.testing.assert_array_almost_equal(sol.y[1, :], np.ones(sol.t.shape))
+            np.testing.assert_array_almost_equal(
+                sol.y[1, :], np.ones(sol.t.shape), err_msg=f"Failed for form {form}"
+            )
 
             # test that y[0] = to true solution
             true_solution = a_value * sol.t
-            np.testing.assert_array_almost_equal(sol.y[0, :], true_solution)
+            np.testing.assert_array_almost_equal(
+                sol.y[0, :], true_solution, err_msg=f"Failed for form {form}"
+            )
 
             # evaluate the sensitivities using idas
             dyda_ida = sol.sensitivities["a"]
@@ -356,12 +386,17 @@ class TestIDAKLUSolver(unittest.TestCase):
             decimal = (
                 2 if form == "iree" else 6
             )  # iree currently operates with single precision
-            np.testing.assert_array_almost_equal(dyda_ida, dyda_fd, decimal=decimal)
+            np.testing.assert_array_almost_equal(
+                dyda_ida, dyda_fd, decimal=decimal, err_msg=f"Failed for form {form}"
+            )
 
             # get the sensitivities for the variable
             d2uda = sol["2u"].sensitivities["a"]
             np.testing.assert_array_almost_equal(
-                2 * dyda_ida[0:200:2], d2uda, decimal=decimal
+                2 * dyda_ida[0:200:2],
+                d2uda,
+                decimal=decimal,
+                err_msg=f"Failed for form {form}",
             )
 
     def test_ida_roberts_consistent_initialization(self):
@@ -399,10 +434,14 @@ class TestIDAKLUSolver(unittest.TestCase):
             solver._set_consistent_initialization(model, t0, inputs_dict={})
 
             # u(t0) = 0, v(t0) = 1
-            np.testing.assert_array_almost_equal(model.y0full, [0, 1])
+            np.testing.assert_array_almost_equal(
+                model.y0full, [0, 1], err_msg=f"Failed for form {form}"
+            )
             # u'(t0) = 0.1 * v(t0) = 0.1
             # Since v is algebraic, the initial derivative is set to 0
-            np.testing.assert_array_almost_equal(model.ydot0full, [0.1, 0])
+            np.testing.assert_array_almost_equal(
+                model.ydot0full, [0.1, 0], err_msg=f"Failed for form {form}"
+            )
 
     def test_sensitivities_with_events(self):
         # this test implements a python version of the ida Roberts
@@ -452,11 +491,15 @@ class TestIDAKLUSolver(unittest.TestCase):
             )
 
             # test that y[1] remains constant
-            np.testing.assert_array_almost_equal(sol.y[1, :], np.ones(sol.t.shape))
+            np.testing.assert_array_almost_equal(
+                sol.y[1, :], np.ones(sol.t.shape), err_msg=f"Failed for form {form}"
+            )
 
             # test that y[0] = to true solution
             true_solution = a_value * sol.t
-            np.testing.assert_array_almost_equal(sol.y[0, :], true_solution)
+            np.testing.assert_array_almost_equal(
+                sol.y[0, :], true_solution, err_msg=f"Failed for form {form}"
+            )
 
             # evaluate the sensitivities using idas
             dyda_ida = sol.sensitivities["a"]
@@ -484,7 +527,10 @@ class TestIDAKLUSolver(unittest.TestCase):
                 2 if form == "iree" else 6
             )  # iree currently operates with single precision
             np.testing.assert_array_almost_equal(
-                dyda_ida[: (2 * max_index), :], dyda_fd, decimal=decimal
+                dyda_ida[: (2 * max_index), :],
+                dyda_fd,
+                decimal=decimal,
+                err_msg=f"Failed for form {form}",
             )
 
             sol_plus = solver.solve(
@@ -504,7 +550,10 @@ class TestIDAKLUSolver(unittest.TestCase):
             dydb_fd = dydb_fd.transpose().reshape(-1, 1)
 
             np.testing.assert_array_almost_equal(
-                dydb_ida[: (2 * max_index), :], dydb_fd, decimal=decimal
+                dydb_ida[: (2 * max_index), :],
+                dydb_fd,
+                decimal=decimal,
+                err_msg=f"Failed for form {form}",
             )
 
     def test_failures(self):
@@ -945,7 +994,10 @@ class TestIDAKLUSolver(unittest.TestCase):
             tol = 1e-5 if form != "iree" else 1e-2  # iree has reduced precision
             for varname in output_variables:
                 np.testing.assert_array_almost_equal(
-                    sol[varname](t_eval), sol_all[varname](t_eval), tol
+                    sol[varname](t_eval),
+                    sol_all[varname](t_eval),
+                    tol,
+                    err_msg=f"Failed for {varname} with form {form}",
                 )
 
             # Mock a 1D current collector and initialise (none in the model)

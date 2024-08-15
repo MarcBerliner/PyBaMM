@@ -1167,6 +1167,9 @@ class IDAKLUSolver(pybamm.BaseSolver):
             The variables to be returned. If None, all variables in the model are used.
         calculate_sensitivities : bool, optional
             Whether to calculate sensitivities. Default is True.
+        t_interp : None, list or ndarray, optional
+            The times (in seconds) at which to interpolate the solution. Defaults to None.
+            Only valid for solvers that support intra-solve interpolation (`IDAKLUSolver`).
         """
         obj = pybamm.IDAKLUJax(
             self,  # IDAKLU solver instance
