@@ -65,7 +65,7 @@ class TestExperiment:
                 },
             ],
         )
-        self.assertEqual(experiment.cycle_lengths, [2, 1, 1])
+        assert experiment.cycle_lengths == [2, 1, 1]
 
     def test_invalid_step_type(self):
         unprocessed = {1.0}
