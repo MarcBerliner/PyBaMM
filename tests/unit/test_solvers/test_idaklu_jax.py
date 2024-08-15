@@ -427,8 +427,6 @@ class TestIDAKLUJax(unittest.TestCase):
 
     @parameterized.expand(testcase, skip_on_empty=True)
     def test_jacrev_vector(self, output_variables, idaklu_jax_solver, f, wrapper):
-        # raise ValueError(f"{wrapper(jax.jacrev(f, argnums=1))(t_eval[0], inputs)}")
-        # return
         out = wrapper(jax.jacrev(f, argnums=1))(t_eval, inputs)
         flat_out, _ = tree_flatten(out)
         flat_out = np.concatenate(np.array([f for f in flat_out]), 1).T.flatten()
