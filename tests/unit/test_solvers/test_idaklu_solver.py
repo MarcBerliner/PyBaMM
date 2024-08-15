@@ -465,7 +465,7 @@ class TestIDAKLUSolver(unittest.TestCase):
             model.rhs = {u: a * v + b}
             model.algebraic = {v: 1 - v}
             model.initial_conditions = {u: 0, v: 1}
-            # model.events = [pybamm.Event("1", 0.2 - u)]
+            model.events = [pybamm.Event("1", 0.2 - u)]
 
             disc = pybamm.Discretisation()
             disc.process_model(model)
