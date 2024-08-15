@@ -340,53 +340,6 @@ def run_ida(session):
     session.run(
         "pytest",
         "tests/unit/test_solvers/test_idaklu_solver.py",
-        # "tests/unit/test_solvers/test_idaklu_jax.py",
-        "tests/integration/test_solvers/test_idaklu.py",
-    )  # Run pytest on both specified test files
-
-
-@nox.session(name="solvers")
-def run_solvers(session):
-    """Run the solver tests."""
-    set_environment_variables(PYBAMM_ENV, session=session)
-    session.install("setuptools", silent=False)
-    session.install("-e", ".[all,dev,jax]", silent=False)
-    if PYBAMM_ENV.get("PYBAMM_IDAKLU_EXPR_IREE") == "ON":
-        # See comments in 'dev' session
-        session.install(
-            "-e",
-            ".[iree]",
-            "--find-links",
-            PYBAMM_ENV.get("IREE_INDEX_URL"),
-            silent=False,
-        )
-    session.install("pytest")  # Install pytest or any other dependencies
-    session.run(
-        "pytest",
-        "tests/unit/test_solvers",
-        "tests/integration/test_solvers",
-    )  # Run pytest on both specified test files
-
-
-@nox.session(name="jax")
-def run_jax(session):
-    """Run the jax tests."""
-    set_environment_variables(PYBAMM_ENV, session=session)
-    session.install("setuptools", silent=False)
-    session.install("-e", ".[all,dev,jax]", silent=False)
-    if PYBAMM_ENV.get("PYBAMM_IDAKLU_EXPR_IREE") == "ON":
-        # See comments in 'dev' session
-        session.install(
-            "-e",
-            ".[iree]",
-            "--find-links",
-            PYBAMM_ENV.get("IREE_INDEX_URL"),
-            silent=False,
-        )
-    session.install("pytest")  # Install pytest or any other dependencies
-    session.run(
-        "pytest",
-        # "tests/integration/test_models/test_full_battery_models/test_lithium_ion/test_spm.py",
         "tests/unit/test_solvers/test_idaklu_jax.py",
-        # "tests/integration/test_solvers",
+        "tests/integration/test_solvers/test_idaklu.py",
     )  # Run pytest on both specified test files
