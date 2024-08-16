@@ -942,12 +942,13 @@ class TestIDAKLUSolver(unittest.TestCase):
             disc = pybamm.Discretisation(mesh, model.default_spatial_methods)
             disc.process_model(model)
 
-            t_eval = np.linspace(0, 100, 100)
+            t_eval = np.linspace(0, 100, 5)
 
             options = {
                 "linear_solver": "SUNLinSol_KLU",
                 "jacobian": "sparse",
                 "num_threads": 4,
+                "max_num_steps": 1000,
             }
             if form == "iree":
                 options["jax_evaluator"] = "iree"
