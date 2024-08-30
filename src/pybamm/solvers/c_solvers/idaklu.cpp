@@ -8,6 +8,9 @@
 #include <pybind11/stl.h>
 #include <pybind11/stl_bind.h>
 
+#include <casadi/casadi.hpp>
+#include <casadi/core/function.hpp>
+
 #include "idaklu/idaklu_solver.hpp"
 #include "idaklu/IdakluJax.hpp"
 #include "idaklu/common.hpp"
@@ -69,6 +72,15 @@ PYBIND11_MODULE(idaklu, m)
     py::arg("options"),
     py::return_value_policy::take_ownership);
 
+  m.def("initialise_0D", &initialise_0D<CasadiFunctions>,
+    "Observe 0D variables",
+    py::arg("all_ts_np"),
+    py::arg("all_ys_np"),
+    py::arg("all_inputs_casadi_np"),
+    py::arg("base_variables_casadi"),
+    py::arg("contiguous"),
+    py::return_value_policy::take_ownership);
+
 #ifdef IREE_ENABLE
   m.def("create_iree_solver", &create_idaklu_solver<IREEFunctions>,
     "Create a iree idaklu solver object",
@@ -94,6 +106,15 @@ PYBIND11_MODULE(idaklu, m)
     py::arg("dvar_dy_fcns"),
     py::arg("dvar_dp_fcns"),
     py::arg("options"),
+    py::return_value_policy::take_ownership);
+
+  m.def("initialise_0D", &initialise_0D<IREEFunctions>,
+    "Observe 0D variables",
+    py::arg("all_ts_np"),
+    py::arg("all_ys_np"),
+    py::arg("all_inputs_casadi_np"),
+    py::arg("base_variables_casadi"),
+    py::arg("contiguous"),
     py::return_value_policy::take_ownership);
 #endif
 

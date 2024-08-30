@@ -189,4 +189,124 @@ IDAKLUSolver *create_idaklu_solver(
   return idakluSolver;
 }
 
+///*
+template<class ExprSet>
+py::array_t<double> initialise_0D(
+    const std::vector<py::array_t<double>>& ts_np,
+    const std::vector<py::array_t<double>>& ys_np,
+    const std::vector<np_array_dense>& inputs_np,
+    const std::vector<const typename ExprSet::BaseFunctionType*>& funcs,
+    const bool contiguous
+) {
+    // Determine the total size of output
+    int N = 0;
+    for (const auto& arr : ts_np) {
+        N += arr.size(); // Since ts_np[i] is 1D, size() gives the number of elements
+    }
+
+    // Create a numpy array to manage the output
+    py::array_t<double> out_array(N);
+    auto out = out_array.mutable_data();
+
+    std::vector<double> y_buffer;
+
+    std::vector<const double*> args;
+    std::vector<double*> results;
+    int M;
+
+    int count = 0;
+    for (size_t i = 0; i < ts_np.size(); i++) {
+        const auto& t_i = ts_np[i].unchecked<1>();
+        const auto& y_i = ys_np[i].unchecked<2>();  // y_i is 2D
+        const auto inputs_data_i = inputs_np[i].data();
+        const auto func_i = funcs[i];
+
+        if (!contiguous) {
+          M = y_i.shape(0);
+          if (y_buffer.size() < M) {
+              y_buffer.resize(M); // Resize the buffer
+          }
+        }
+
+        for (size_t j = 0; j < t_i.size(); j++) {
+            const double t_ij = t_i(j);
+
+            // Use a view of y_i
+            if (!contiguous) {
+              for (int k = 0; k < M; k++) {
+                  y_buffer[k] = y_i(k, j);
+              }
+            }
+            const double* y_ij = contiguous ? &y_i(0, j) : y_buffer.data();
+
+            // Prepare CasADi function arguments
+            args = { &t_ij, y_ij, inputs_data_i };
+            results = { &out[count] };
+            // Call the CasADi function with proper arguments
+            (*func_i)(args, results);
+
+            count++;
+        }
+    }
+
+    // Return the numpy array
+    return out_array;
+  }
+//*/
+/*
+template<class ExprSet>
+py::array_t<double> initialise_0D(
+    const std::vector<py::array_t<double>>& ts_np,
+    const std::vector<py::array_t<double>>& ys_np,
+    const std::vector<np_array_dense>& inputs_np,
+    const std::vector<typename ExprSet::BaseFunctionType*>& funcs
+) {
+    // Determine the total size of output
+    int N = 0;
+    for (const auto& arr : ts_np) {
+        N += arr.size(); // Since ts_np[i] is 1D, size() gives the number of elements
+    }
+
+    // Create a numpy array to manage the output
+    py::array_t<double> out_array(N);
+    auto out = out_array.mutable_data();
+
+    // Temporary buffer to avoid repeated allocations
+    std::vector<double> y_ij;
+
+    int count = 0;
+    for (size_t i = 0; i < ts_np.size(); ++i) {
+        const auto& t_i = ts_np[i].unchecked<1>();
+        const auto& y_i = ys_np[i].unchecked<2>();  // y_i is 2D
+        const auto inputs_data_i = inputs_np[i].data();
+        const auto func_i = funcs[i];
+
+        int M = y_i.shape(0);
+        if (y_ij.size() < M) {
+            y_ij.resize(M); // Resize the buffer
+        }
+
+        for (size_t j = 0; j < t_i.size(); ++j) {
+            const double t_ij = t_i(j);
+
+            // Populate y_ij directly from y_i
+            for (int k = 0; k < M; ++k) {
+                y_ij[k] = y_i(k, j);
+            }
+
+            // Prepare CasADi function arguments
+            std::vector<const double*> args = { &t_ij, y_ij.data(), inputs_data_i };
+            std::vector<double*> results = { &out[count] };
+
+            // Call the CasADi function with proper arguments
+            (*func_i)(args, results);
+
+            count++;
+        }
+    }
+
+    // Return the numpy array
+    return out_array;
+}
+*/
 #endif // PYBAMM_CREATE_IDAKLU_SOLVER_HPP
