@@ -27,6 +27,10 @@
 #include <sunmatrix/sunmatrix_sparse.h> /* access to sparse SUNMatrix           */
 #include <sunmatrix/sunmatrix_dense.h> /* access to dense SUNMatrix           */
 
+#include <casadi/casadi.hpp>
+#include <casadi/core/function.hpp>
+#include <casadi/core/sparsity.hpp>
+
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
 

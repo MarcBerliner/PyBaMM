@@ -528,57 +528,64 @@ class Solution:
         if isinstance(self._all_sensitivities, bool) and self._all_sensitivities:
             self.extract_explicit_sensitivities()
 
-        # Convert single entry to list
+        # Single variable
         if isinstance(variables, str):
-            variables = [variables]
+            self._update_variable(variables)
+            return
+
         # Process
-        for key in variables:
-            cumtrapz_ic = None
-            pybamm.logger.debug(f"Post-processing {key}")
-            vars_pybamm = [model.variables_and_events[key] for model in self.all_models]
+        for variable in variables:
+            self._update_variable(variable)
 
-            # Iterate through all models, some may be in the list several times and
-            # therefore only get set up once
-            vars_casadi = []
-            for i, (model, ys, inputs, var_pybamm) in enumerate(
-                zip(self.all_models, self.all_ys, self.all_inputs, vars_pybamm)
+    def _update_variable(self, variable):
+        cumtrapz_ic = None
+        pybamm.logger.debug(f"Post-processing {variable}")
+        vars_pybamm = [
+            model.variables_and_events[variable] for model in self.all_models
+        ]
+
+        # Iterate through all models, some may be in the list several times and
+        # therefore only get set up once
+        vars_casadi = []
+        for i, (model, ys, inputs, var_pybamm) in enumerate(
+            zip(self.all_models, self.all_ys, self.all_inputs, vars_pybamm)
+        ):
+            if ys.size == 0 and var_pybamm.has_symbol_of_classes(
+                pybamm.expression_tree.state_vector.StateVector
             ):
-                if ys.size == 0 and var_pybamm.has_symbol_of_classes(
-                    pybamm.expression_tree.state_vector.StateVector
-                ):
-                    raise KeyError(
-                        f"Cannot process variable '{key}' as it was not part of the "
-                        "solve. Please re-run the solve with `output_variables` set to "
-                        "include this variable."
-                    )
-                elif isinstance(var_pybamm, pybamm.ExplicitTimeIntegral):
-                    cumtrapz_ic = var_pybamm.initial_condition
-                    cumtrapz_ic = cumtrapz_ic.evaluate()
-                    var_pybamm = var_pybamm.child
-                    var_casadi = self.process_casadi_var(
-                        var_pybamm,
-                        inputs,
-                        ys.shape,
-                    )
-                    model._variables_casadi[key] = var_casadi
-                    vars_pybamm[i] = var_pybamm
-                elif key in model._variables_casadi:
-                    var_casadi = model._variables_casadi[key]
-                else:
-                    var_casadi = self.process_casadi_var(
-                        var_pybamm,
-                        inputs,
-                        ys.shape,
-                    )
-                    model._variables_casadi[key] = var_casadi
-                vars_casadi.append(var_casadi)
-            var = pybamm.ProcessedVariable(
-                vars_pybamm, vars_casadi, self, cumtrapz_ic=cumtrapz_ic
-            )
+                raise KeyError(
+                    f"Cannot process variable '{variable}' as it was not part of the "
+                    "solve. Please re-run the solve with `output_variables` set to "
+                    "include this variable."
+                )
+            elif isinstance(var_pybamm, pybamm.ExplicitTimeIntegral):
+                cumtrapz_ic = var_pybamm.initial_condition
+                cumtrapz_ic = cumtrapz_ic.evaluate()
+                var_pybamm = var_pybamm.child
+                var_casadi = self.process_casadi_var(
+                    var_pybamm,
+                    inputs,
+                    ys.shape,
+                )
+                model._variables_casadi[variable] = var_casadi
+                vars_pybamm[i] = var_pybamm
+            elif variable in model._variables_casadi:
+                var_casadi = model._variables_casadi[variable]
+            else:
+                var_casadi = self.process_casadi_var(
+                    var_pybamm,
+                    inputs,
+                    ys.shape,
+                )
+                model._variables_casadi[variable] = var_casadi
+            vars_casadi.append(var_casadi)
+        var = pybamm.ProcessedVariable(
+            vars_pybamm, vars_casadi, self, cumtrapz_ic=cumtrapz_ic
+        )
 
-            # Save variable and data
-            self._variables[key] = var
-            self.data[key] = var.data
+        # Save variable and data
+        self._variables[variable] = var
+        self.data[variable] = var.data
 
     def process_casadi_var(self, var_pybamm, inputs, ys_shape):
         t_MX = casadi.MX.sym("t")
@@ -588,7 +595,32 @@ class Solution:
         }
         inputs_MX = casadi.vertcat(*[p for p in inputs_MX_dict.values()])
         var_sym = var_pybamm.to_casadi(t_MX, y_MX, inputs=inputs_MX_dict)
-        var_casadi = casadi.Function("variable", [t_MX, y_MX, inputs_MX], [var_sym])
+
+        opts = {
+            "inputs_check": False,
+            "is_diff_in": [False, False, False],
+            "is_diff_out": [False],
+            "max_io": 3,
+            "regularity_check": False,
+            # "ad_weight_sp": -1,
+            # "always_inline": True,
+            # "cache": True,
+            "error_on_fail": False,
+            "enable_jacobian": False,
+            # "always_inline": True,
+        }
+
+        var_casadi = casadi.Function(
+            "variable",
+            [t_MX, y_MX, inputs_MX],
+            [var_sym],
+            opts,
+        )
+
+        try:
+            var_casadi = var_casadi.expand()
+        except RuntimeError:
+            pass
         return var_casadi
 
     def __getitem__(self, key):

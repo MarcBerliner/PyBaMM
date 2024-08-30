@@ -114,18 +114,11 @@ class ProcessedVariable:
 
     def initialise_0D(self):
         # initialise empty array of the correct size
-        entries = np.empty(len(self.t_pts))
-        idx = 0
-        # Evaluate the base_variable index-by-index
-        for ts, ys, inputs, base_var_casadi in zip(
-            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
-        ):
-            for inner_idx, t in enumerate(ts):
-                t = ts[inner_idx]
-                y = ys[:, inner_idx]
-                entries[idx] = float(base_var_casadi(t, y, inputs))
 
-                idx += 1
+        if len(self.t_pts) > 1 and pybamm.have_idaklu():
+            entries = self._initialise_0D_batch()
+        else:
+            entries = self._initialise_0D_single()
 
         if self.cumtrapz_ic is not None:
             entries = cumulative_trapezoid(
@@ -138,6 +131,34 @@ class ProcessedVariable:
 
         self.entries = entries
         self.dimensions = 0
+
+    def _initialise_0D_single(self):
+        entries = np.empty(1)
+        # Evaluate the base_variable index-by-index
+        for ts, ys, inputs, base_var_casadi in zip(
+            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
+        ):
+            t = ts[0]
+            y = ys[:, 0]
+            entries[0] = float(base_var_casadi(t, y, inputs))
+
+        return entries
+
+    def _initialise_0D_batch(self):
+        contiguous = False
+
+        entries = pybamm.solvers.idaklu_solver.idaklu.initialise_0D(
+            pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ts),
+            pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ys),
+            self.all_inputs_casadi,
+            [
+                pybamm.solvers.idaklu_solver.idaklu.generate_function(x.serialize())
+                for x in self.base_variables_casadi
+            ],
+            contiguous,
+        )
+
+        return entries
 
     def initialise_1D(self, fixed_t=False):
         len_space = self.base_eval_shape[0]
