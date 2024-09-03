@@ -72,13 +72,37 @@ PYBIND11_MODULE(idaklu, m)
     py::arg("options"),
     py::return_value_policy::take_ownership);
 
-  m.def("initialise_0D", &initialise_0D<CasadiFunctions>,
+  m.def("observe_0D", &observe_0D<CasadiFunctions>,
     "Observe 0D variables",
-    py::arg("all_ts_np"),
-    py::arg("all_ys_np"),
-    py::arg("all_inputs_casadi_np"),
-    py::arg("base_variables_casadi"),
-    py::arg("contiguous"),
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("is_f_contiguous"),
+    py::arg("size0"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_1D", &observe_1D<CasadiFunctions>,
+    "Observe 1D variables",
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("is_f_contiguous"),
+    py::arg("size0"),
+    py::arg("size1"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_2D", &observe_2D<CasadiFunctions>,
+    "Observe 2D variables",
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("is_f_contiguous"),
+    py::arg("size0"),
+    py::arg("size1"),
+    py::arg("size2"),
     py::return_value_policy::take_ownership);
 
 #ifdef IREE_ENABLE
@@ -108,13 +132,37 @@ PYBIND11_MODULE(idaklu, m)
     py::arg("options"),
     py::return_value_policy::take_ownership);
 
-  m.def("initialise_0D", &initialise_0D<IREEFunctions>,
+  m.def("observe_0D", &observe_0D<IREEFunctions>,
     "Observe 0D variables",
-    py::arg("all_ts_np"),
-    py::arg("all_ys_np"),
-    py::arg("all_inputs_casadi_np"),
-    py::arg("base_variables_casadi"),
-    py::arg("contiguous"),
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("is_f_contiguous"),
+    py::arg("size0"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_1D", &observe_1D<IREEFunctions>,
+    "Observe 1D variables",
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("is_f_contiguous"),
+    py::arg("size0"),
+    py::arg("size1"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_2D", &observe_2D<IREEFunctions>,
+    "Observe 2D variables",
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("is_f_contiguous"),
+    py::arg("size0"),
+    py::arg("size1"),
+    py::arg("size2"),
     py::return_value_policy::take_ownership);
 #endif
 

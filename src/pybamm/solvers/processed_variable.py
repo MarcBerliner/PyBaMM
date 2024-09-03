@@ -114,11 +114,10 @@ class ProcessedVariable:
 
     def initialise_0D(self):
         # initialise empty array of the correct size
-
-        if len(self.t_pts) > 1 and pybamm.have_idaklu():
-            entries = self._initialise_0D_batch()
+        if self._observe_in_cpp():
+            entries = self._observe_0D_cpp()
         else:
-            entries = self._initialise_0D_single()
+            entries = self._observe_0D_python()
 
         if self.cumtrapz_ic is not None:
             entries = cumulative_trapezoid(
@@ -132,48 +131,14 @@ class ProcessedVariable:
         self.entries = entries
         self.dimensions = 0
 
-    def _initialise_0D_single(self):
-        entries = np.empty(1)
-        # Evaluate the base_variable index-by-index
-        for ts, ys, inputs, base_var_casadi in zip(
-            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
-        ):
-            t = ts[0]
-            y = ys[:, 0]
-            entries[0] = float(base_var_casadi(t, y, inputs))
-
-        return entries
-
-    def _initialise_0D_batch(self):
-        contiguous = False
-
-        entries = pybamm.solvers.idaklu_solver.idaklu.initialise_0D(
-            pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ts),
-            pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ys),
-            self.all_inputs_casadi,
-            [
-                pybamm.solvers.idaklu_solver.idaklu.generate_function(x.serialize())
-                for x in self.base_variables_casadi
-            ],
-            contiguous,
-        )
-
-        return entries
-
     def initialise_1D(self, fixed_t=False):
         len_space = self.base_eval_shape[0]
-        entries = np.empty((len_space, len(self.t_pts)))
 
         # Evaluate the base_variable index-by-index
-        idx = 0
-        for ts, ys, inputs, base_var_casadi in zip(
-            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
-        ):
-            for inner_idx, t in enumerate(ts):
-                t = ts[inner_idx]
-                y = ys[:, inner_idx]
-                entries[:, idx] = base_var_casadi(t, y, inputs).full()[:, 0]
-                idx += 1
+        if len(self.t_pts) > 1 and pybamm.has_idaklu():
+            entries = self._observe_1D_cpp(len_space)
+        else:
+            entries = self._observe_1D_python(len_space)
 
         # Get node and edge values
         nodes = self.mesh.nodes
@@ -229,22 +194,10 @@ class ProcessedVariable:
         second_dim_pts = second_dim_nodes
         first_dim_size = len(first_dim_pts)
         second_dim_size = len(second_dim_pts)
-        entries = np.empty((first_dim_size, second_dim_size, len(self.t_pts)))
-
-        # Evaluate the base_variable index-by-index
-        idx = 0
-        for ts, ys, inputs, base_var_casadi in zip(
-            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
-        ):
-            for inner_idx, t in enumerate(ts):
-                t = ts[inner_idx]
-                y = ys[:, inner_idx]
-                entries[:, :, idx] = np.reshape(
-                    base_var_casadi(t, y, inputs).full(),
-                    [first_dim_size, second_dim_size],
-                    order="F",
-                )
-                idx += 1
+        if len(self.t_pts) > 1 and pybamm.has_idaklu():
+            entries = self._observe_2D_cpp(first_dim_size, second_dim_size)
+        else:
+            entries = self._observe_2D_python(first_dim_size, second_dim_size)
 
         # add points outside first dimension domain for extrapolation to
         # boundaries
@@ -497,3 +450,139 @@ class ProcessedVariable:
 
         # Save attribute
         self._sensitivities = sensitivities
+
+    def _observe_in_cpp(self):
+        """
+        For a small number of time points, it is faster to evaluate the base variable in
+        Python. For large number of time points, it is faster to evaluate the base
+        variable in C++.
+        """
+        return pybamm.has_idaklu() and len(self.t_pts) > 1
+
+    def _setup_cpp_inputs(self):
+        ts = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ts)
+        ys = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ys)
+
+        inputs = self.all_inputs_casadi
+
+        # Generate the serialized C++ functions only once
+        funcs_unique = {}
+        funcs = [None] * len(self.base_variables_casadi)
+
+        for i, x in enumerate(self.base_variables_casadi):
+            if x not in funcs_unique:
+                funcs_unique[x] = pybamm.solvers.idaklu_solver.idaklu.generate_function(
+                    x.serialize()
+                )
+            funcs[i] = funcs_unique[x]
+
+        is_f_contiguous = _is_f_contiguous(self.all_ys)
+
+        return ts, ys, inputs, funcs, is_f_contiguous
+
+    def _observe_0D_cpp(self):
+        ts, ys, inputs, funcs, is_f_contiguous = self._setup_cpp_inputs()
+
+        entries = pybamm.solvers.idaklu_solver.idaklu.observe_0D(
+            ts, ys, inputs, funcs, is_f_contiguous, len(self.t_pts)
+        )
+
+        return entries
+
+    def _observe_1D_cpp(self, first_dim_size):
+        ts, ys, inputs, funcs, is_f_contiguous = self._setup_cpp_inputs()
+
+        entries = pybamm.solvers.idaklu_solver.idaklu.observe_1D(
+            ts,
+            ys,
+            inputs,
+            funcs,
+            is_f_contiguous,
+            len(self.t_pts),
+            first_dim_size,
+        )
+
+        return entries
+
+    def _observe_2D_cpp(self, first_dim_size, second_dim_size):
+        ts, ys, inputs, funcs, is_f_contiguous = self._setup_cpp_inputs()
+
+        entries = pybamm.solvers.idaklu_solver.idaklu.observe_2D(
+            ts,
+            ys,
+            inputs,
+            funcs,
+            is_f_contiguous,
+            len(self.t_pts),
+            first_dim_size,
+            second_dim_size,
+        )
+
+        return entries
+
+    def _observe_0D_python(self):
+        # initialise empty array of the correct size
+        entries = np.empty(len(self.t_pts))
+        idx = 0
+        # Evaluate the base_variable index-by-index
+        for ts, ys, inputs, base_var_casadi in zip(
+            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
+        ):
+            for inner_idx, t in enumerate(ts):
+                t = ts[inner_idx]
+                y = ys[:, inner_idx]
+                entries[idx] = float(base_var_casadi(t, y, inputs))
+
+                idx += 1
+
+        return entries
+
+    def _observe_1D_python(self, len_space):
+        entries = np.empty((len_space, len(self.t_pts)))
+
+        # Evaluate the base_variable index-by-index
+        idx = 0
+        for ts, ys, inputs, base_var_casadi in zip(
+            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
+        ):
+            for inner_idx, t in enumerate(ts):
+                t = ts[inner_idx]
+                y = ys[:, inner_idx]
+                entries[:, idx] = base_var_casadi(t, y, inputs).full()[:, 0]
+                idx += 1
+
+        return entries
+
+    def _observe_2D_python(self, first_dim_size, second_dim_size):
+        entries = np.empty((first_dim_size, second_dim_size, len(self.t_pts)))
+
+        # Evaluate the base_variable index-by-index
+        idx = 0
+        for ts, ys, inputs, base_var_casadi in zip(
+            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
+        ):
+            for inner_idx, t in enumerate(ts):
+                t = ts[inner_idx]
+                y = ys[:, inner_idx]
+                entries[:, :, idx] = np.reshape(
+                    base_var_casadi(t, y, inputs).full(),
+                    [first_dim_size, second_dim_size],
+                    order="F",
+                )
+                idx += 1
+
+        return entries
+
+
+def _is_f_contiguous(all_ys):
+    """
+    Check if all the ys are f-contiguous in memory
+
+    Args:
+        all_ys (list of np.ndarray): list of all ys
+
+    Returns:
+        bool: True if all ys are f-contiguous
+    """
+
+    return all(isinstance(y, np.ndarray) and y.data.f_contiguous for y in all_ys)

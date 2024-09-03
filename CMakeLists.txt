@@ -80,6 +80,7 @@ pybind11_add_module(idaklu
   src/pybamm/solvers/c_solvers/idaklu.cpp
   # IDAKLU solver (SUNDIALS)
   src/pybamm/solvers/c_solvers/idaklu/idaklu_solver.hpp
+  src/pybamm/solvers/c_solvers/idaklu/observe.hpp
   src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolver.cpp
   src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolver.hpp
   src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolverOpenMP.inl

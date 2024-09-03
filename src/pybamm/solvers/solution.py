@@ -600,15 +600,14 @@ class Solution:
             "inputs_check": False,
             "is_diff_in": [False, False, False],
             "is_diff_out": [False],
-            "max_io": 3,
             "regularity_check": False,
-            # "ad_weight_sp": -1,
-            # "always_inline": True,
-            # "cache": True,
             "error_on_fail": False,
             "enable_jacobian": False,
-            # "always_inline": True,
         }
+
+        epsilon = 5e-324
+        var_sym = var_sym - epsilon
+        var_sym = var_sym + epsilon
 
         var_casadi = casadi.Function(
             "variable",

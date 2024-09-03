@@ -311,6 +311,7 @@ idaklu_ext = Extension(
         "src/pybamm/solvers/c_solvers/idaklu/Expressions/IREE/ModuleParser.cpp",
         "src/pybamm/solvers/c_solvers/idaklu/Expressions/IREE/ModuleParser.hpp",
         "src/pybamm/solvers/c_solvers/idaklu/idaklu_solver.hpp",
+        "src/pybamm/solvers/c_solvers/idaklu/observe.hpp",
         "src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolver.cpp",
         "src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolver.hpp",
         "src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolverOpenMP.inl",
