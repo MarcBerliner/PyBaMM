@@ -10,8 +10,8 @@
  */
 template<class ExprSet>
 void process_time_series(
-    const std::vector<py::array_t<double>>& ts_np,
-    const std::vector<py::array_t<double>>& ys_np,
+    const std::vector<np_array>& ts_np,
+    const std::vector<np_array>& ys_np,
     const std::vector<np_array_dense>& inputs_np,
     const std::vector<const typename ExprSet::BaseFunctionType*>& funcs,
     double* out,
@@ -60,8 +60,8 @@ void process_time_series(
  */
 template<class ExprSet>
 const py::array_t<double> observe_0D(
-    const std::vector<py::array_t<double>>& ts_np,
-    const std::vector<py::array_t<double>>& ys_np,
+    const std::vector<np_array>& ts_np,
+    const std::vector<np_array>& ys_np,
     const std::vector<np_array_dense>& inputs_np,
     const std::vector<const typename ExprSet::BaseFunctionType*>& funcs,
     const bool is_f_contiguous,
@@ -83,8 +83,8 @@ const py::array_t<double> observe_0D(
  */
 template<class ExprSet>
 const py::array_t<double> observe_1D(
-    const std::vector<py::array_t<double>>& ts_np,
-    const std::vector<py::array_t<double>>& ys_np,
+    const std::vector<np_array>& ts_np,
+    const std::vector<np_array>& ys_np,
     const std::vector<np_array_dense>& inputs_np,
     const std::vector<const typename ExprSet::BaseFunctionType*>& funcs,
     const bool is_f_contiguous,
@@ -107,8 +107,8 @@ const py::array_t<double> observe_1D(
  */
 template<class ExprSet>
 const py::array_t<double> observe_2D(
-    const std::vector<py::array_t<double>>& ts_np,
-    const std::vector<py::array_t<double>>& ys_np,
+    const std::vector<np_array>& ts_np,
+    const std::vector<np_array>& ys_np,
     const std::vector<np_array_dense>& inputs_np,
     const std::vector<const typename ExprSet::BaseFunctionType*>& funcs,
     const bool is_f_contiguous,

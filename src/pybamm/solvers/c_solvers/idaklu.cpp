@@ -12,6 +12,7 @@
 #include <casadi/core/function.hpp>
 
 #include "idaklu/idaklu_solver.hpp"
+#include "idaklu/observe.hpp"
 #include "idaklu/IdakluJax.hpp"
 #include "idaklu/common.hpp"
 #include "idaklu/Expressions/Casadi/CasadiFunctions.hpp"

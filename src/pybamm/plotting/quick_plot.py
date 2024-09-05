@@ -169,6 +169,22 @@ class QuickPlot:
         min_t = np.min([t[0] for t in self.ts_seconds])
         max_t = np.max([t[-1] for t in self.ts_seconds])
 
+        N_t = sum(len(t) for t in self.ts_seconds)
+        N_t_max = 10000
+        if N_t <= N_t_max:
+            self.ts_seconds = [solution.t for solution in solutions]
+        else:
+            # Downsample onto an even grid
+            tspan = max_t - min_t
+
+            def t_downsample(sol):
+                t0 = sol.t[0]
+                tf = sol.t[-1]
+                N_t = int(N_t_max * (tf - t0) / tspan)
+                return np.linspace(t0, tf, N_t)
+
+            self.ts_seconds = [t_downsample(sol) for sol in solutions]
+
         # Set timescale
         if time_unit is None:
             # defaults depend on how long the simulation is
