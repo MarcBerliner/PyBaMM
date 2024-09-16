@@ -80,7 +80,6 @@ pybind11_add_module(idaklu
   src/pybamm/solvers/c_solvers/idaklu.cpp
   # IDAKLU solver (SUNDIALS)
   src/pybamm/solvers/c_solvers/idaklu/idaklu_solver.hpp
-  src/pybamm/solvers/c_solvers/idaklu/observe.hpp
   src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolver.cpp
   src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolver.hpp
   src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolverOpenMP.inl
@@ -102,6 +101,9 @@ pybind11_add_module(idaklu
   src/pybamm/solvers/c_solvers/idaklu/Expressions/Base/Expression.hpp
   src/pybamm/solvers/c_solvers/idaklu/Expressions/Base/ExpressionSet.hpp
   src/pybamm/solvers/c_solvers/idaklu/Expressions/Base/ExpressionTypes.hpp
+  src/pybamm/solvers/c_solvers/idaklu/observe.hpp
+  src/pybamm/solvers/c_solvers/idaklu/observe.cpp
+  src/pybamm/solvers/c_solvers/idaklu/interpolation.hpp
   # IDAKLU expressions - concrete implementations
   ${IDAKLU_EXPR_CASADI_SOURCE_FILES}
   ${IDAKLU_EXPR_IREE_SOURCE_FILES}

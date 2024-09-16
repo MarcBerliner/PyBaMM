@@ -172,7 +172,14 @@ class QuickPlot:
         N_t = sum(len(t) for t in self.ts_seconds)
         N_t_max = 10000
         if N_t <= N_t_max:
-            self.ts_seconds = [solution.t for solution in solutions]
+            self.ts_seconds = [
+                np.unique(
+                    np.sort(
+                        np.concatenate((sol.t, np.linspace(sol.t[0], sol.t[-1], 101)))
+                    )
+                )
+                for sol in solutions
+            ]
         else:
             # Downsample onto an even grid
             tspan = max_t - min_t

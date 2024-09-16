@@ -597,7 +597,7 @@ class TestIDAKLUSolver:
         solver = pybamm.IDAKLUSolver()
 
         t_eval = [0, 3]
-        with pytest.raises(pybamm.SolverError, match="FAILURE IDA"):
+        with self.assertRaisesRegex(ValueError, "IDA failed with flag"):
             solver.solve(model, t_eval)
 
     def test_dae_solver_algebraic_model(self):
@@ -903,7 +903,7 @@ class TestIDAKLUSolver:
 
         # Mock a 1D current collector and initialise (none in the model)
         sol["x_s [m]"].domain = ["current collector"]
-        sol["x_s [m]"].initialise_1D()
+        sol["x_s [m]"].entries
 
     def test_with_output_variables_and_sensitivities(self):
         # Construct a model and solve for all variables, then test
@@ -999,7 +999,7 @@ class TestIDAKLUSolver:
 
             # Mock a 1D current collector and initialise (none in the model)
             sol["x_s [m]"].domain = ["current collector"]
-            sol["x_s [m]"].initialise_1D()
+            sol["x_s [m]"].entries
 
     def test_bad_jax_evaluator(self):
         model = pybamm.lithium_ion.DFN()

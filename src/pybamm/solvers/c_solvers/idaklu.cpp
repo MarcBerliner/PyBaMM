@@ -13,6 +13,7 @@
 
 #include "idaklu/idaklu_solver.hpp"
 #include "idaklu/observe.hpp"
+#include "idaklu/interpolation.hpp"
 #include "idaklu/IdakluJax.hpp"
 #include "idaklu/common.hpp"
 #include "idaklu/Expressions/Casadi/CasadiFunctions.hpp"
@@ -83,6 +84,42 @@ PYBIND11_MODULE(idaklu, m)
     py::arg("size0"),
     py::return_value_policy::take_ownership);
 
+  m.def("observe_interp_sorted_0D", &observe_interp_sorted_0D<CasadiFunctions>,
+    "Observe 0D variables",
+    py::arg("t_interp_np"),
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("yps_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("size0"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_interp_sorted_1D", &observe_interp_sorted_1D<CasadiFunctions>,
+    "Observe 1D variables",
+    py::arg("t_interp_np"),
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("yps_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("size0"),
+    py::arg("size1"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_interp_sorted_2D", &observe_interp_sorted_2D<CasadiFunctions>,
+    "Observe 2D variables",
+    py::arg("t_interp_np"),
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("yps_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("size0"),
+    py::arg("size1"),
+    py::arg("size2"),
+    py::return_value_policy::take_ownership);
+
   m.def("observe_1D", &observe_1D<CasadiFunctions>,
     "Observe 1D variables",
     py::arg("ts_np"),
@@ -141,6 +178,42 @@ PYBIND11_MODULE(idaklu, m)
     py::arg("funcs"),
     py::arg("is_f_contiguous"),
     py::arg("size0"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_interp_sorted_0D", &observe_interp_sorted_0D<IREEFunctions>,
+    "Observe 0D variables",
+    py::arg("t_interp_np"),
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("yps_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("size0"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_interp_sorted_1D", &observe_interp_sorted_1D<IREEFunctions>,
+    "Observe 1D variables",
+    py::arg("t_interp_np"),
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("yps_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("size0"),
+    py::arg("size1"),
+    py::return_value_policy::take_ownership);
+
+  m.def("observe_interp_sorted_2D", &observe_interp_sorted_2D<IREEFunctions>,
+    "Observe 2D variables",
+    py::arg("t_interp_np"),
+    py::arg("ts_np"),
+    py::arg("ys_np"),
+    py::arg("yps_np"),
+    py::arg("inputs_np"),
+    py::arg("funcs"),
+    py::arg("size0"),
+    py::arg("size1"),
+    py::arg("size2"),
     py::return_value_policy::take_ownership);
 
   m.def("observe_1D", &observe_1D<IREEFunctions>,
@@ -236,5 +309,11 @@ PYBIND11_MODULE(idaklu, m)
     .def_readwrite("y", &Solution::y)
     .def_readwrite("yS", &Solution::yS)
     .def_readwrite("y_term", &Solution::y_term)
+    .def_readwrite("yp", &Solution::yp)
+    .def_readwrite("ypS", &Solution::ypS)
     .def_readwrite("flag", &Solution::flag);
+
+    py::class_<CubicSpline>(m, "CubicSpline")
+      .def(py::init<const np_array&, const np_array&, const np_array&>())
+      .def("Interpolate", &CubicSpline::Interpolate);
 }

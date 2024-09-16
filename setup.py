@@ -311,7 +311,6 @@ idaklu_ext = Extension(
         "src/pybamm/solvers/c_solvers/idaklu/Expressions/IREE/ModuleParser.cpp",
         "src/pybamm/solvers/c_solvers/idaklu/Expressions/IREE/ModuleParser.hpp",
         "src/pybamm/solvers/c_solvers/idaklu/idaklu_solver.hpp",
-        "src/pybamm/solvers/c_solvers/idaklu/observe.hpp",
         "src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolver.cpp",
         "src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolver.hpp",
         "src/pybamm/solvers/c_solvers/idaklu/IDAKLUSolverOpenMP.inl",
@@ -328,6 +327,9 @@ idaklu_ext = Extension(
         "src/pybamm/solvers/c_solvers/idaklu/Solution.hpp",
         "src/pybamm/solvers/c_solvers/idaklu/Options.hpp",
         "src/pybamm/solvers/c_solvers/idaklu/Options.cpp",
+        "src/pybamm/solvers/c_solvers/idaklu/observe.hpp",
+        "src/pybamm/solvers/c_solvers/idaklu/observe.cpp",
+        # "src/pybamm/solvers/c_solvers/idaklu/interpolation.hpp",
         "src/pybamm/solvers/c_solvers/idaklu.cpp",
     ],
 )

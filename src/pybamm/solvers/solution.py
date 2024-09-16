@@ -11,6 +11,7 @@ import pybamm
 import pandas as pd
 from scipy.io import savemat
 from functools import cached_property
+from scipy.interpolate import CubicHermiteSpline
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -75,6 +76,7 @@ class Solution:
         y_event=None,
         termination="final time",
         all_sensitivities=False,
+        all_yps=None,
         check_solution=True,
     ):
         if not isinstance(all_ts, list):
@@ -87,6 +89,11 @@ class Solution:
         self._all_ys = all_ys
         self._all_ys_and_sens = all_ys
         self._all_models = all_models
+
+        self._hermite_interpolation = all_yps is not None
+        if self.hermite_interpolation and not isinstance(all_yps, list):
+            all_yps = [all_yps]
+        self._all_yps = all_yps
 
         # Set up inputs
         if not isinstance(all_inputs, list):
@@ -401,6 +408,14 @@ class Solution:
         return [casadi.vertcat(*inp.values()) for inp in self.all_inputs]
 
     @property
+    def all_yps(self):
+        return self._all_yps
+
+    @property
+    def hermite_interpolation(self):
+        return self._hermite_interpolation
+
+    @property
     def t_event(self):
         """Time at which the event happens"""
         return self._t_event
@@ -616,10 +631,6 @@ class Solution:
             opts,
         )
 
-        try:
-            var_casadi = var_casadi.expand()
-        except RuntimeError:
-            pass
         return var_casadi
 
     def __getitem__(self, key):
@@ -853,9 +864,16 @@ class Solution:
             # Skip first time step if it is repeated
             all_ts = self.all_ts + [other.all_ts[0][1:]] + other.all_ts[1:]
             all_ys = self.all_ys + [other.all_ys[0][:, 1:]] + other.all_ys[1:]
+            if self.hermite_interpolation:
+                all_yps = self.all_yps + [other.all_yps[0][:, 1:]] + other.all_yps[1:]
         else:
             all_ts = self.all_ts + other.all_ts
             all_ys = self.all_ys + other.all_ys
+            if self.hermite_interpolation:
+                all_yps = self.all_yps + other.all_yps
+
+        if not self.hermite_interpolation:
+            all_yps = None
 
         # sensitivities can be:
         # - bool if not using sensitivities or using explicit sensitivities which still
@@ -889,7 +907,8 @@ class Solution:
             other.t_event,
             other.y_event,
             other.termination,
-            all_sensitivities=all_sensitivities,
+            all_sensitivities,
+            all_yps,
         )
 
         new_sol.closest_event_idx = other.closest_event_idx
@@ -922,6 +941,7 @@ class Solution:
             self.y_event,
             self.termination,
             self._all_sensitivities,
+            self.all_yps,
         )
         new_sol._all_inputs_casadi = self.all_inputs_casadi
         new_sol._sub_solutions = self.sub_solutions
@@ -969,6 +989,17 @@ class Solution:
             show_plot=show_plot,
             **kwargs_fill,
         )
+
+    def _get_hermite_interpolators(self):
+        """
+        Set up the cubic Hermite spline interpolators
+        """
+        # Set up the Hermite interpolation
+        interpolants = [
+            CubicHermiteSpline(t, y, yp, axis=1)
+            for t, y, yp in zip(self.all_ts, self.all_ys, self.all_yps)
+        ]
+        return interpolants
 
 
 class EmptySolution:
@@ -1032,6 +1063,7 @@ def make_cycle_solution(
         sum_sols.y_event,
         sum_sols.termination,
         sum_sols._all_sensitivities,
+        sum_sols.all_yps,
     )
     cycle_solution._all_inputs_casadi = sum_sols.all_inputs_casadi
     cycle_solution._sub_solutions = sum_sols.sub_solutions
