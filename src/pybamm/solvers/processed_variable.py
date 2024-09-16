@@ -79,12 +79,75 @@ class ProcessedVariable:
         self.base_eval_size = self.base_variables[0].size
 
         # xr_data_array is initialized
-        self._xr_data_array = None
+        self._raw_data_initialized = False
+        self._xr_data_array_raw = None
         self._entries_raw = None
+        self._entries_for_interp_raw = None
+        self._coords_raw = None
 
-    def initialise(self):
-        entries = self.observe()
-        return self._initialise(entries)
+    def initialise(self, t=None):
+        observe_raw = self._observe_raw_data(t)
+        if observe_raw and self._raw_data_initialized:
+            time_interpolated = False
+            return (
+                self._entries_raw,
+                time_interpolated,
+                self._entries_for_interp_raw,
+                self._coords_raw,
+            )
+
+        if observe_raw:
+            t_observe = self.t_pts
+        else:
+            t_observe = np.asarray(t)
+
+        entries, time_interpolated = self.observe(t_observe)
+        entries_for_interp, coords = self._interp_setup(entries, t_observe)
+
+        if observe_raw:
+            self._entries_raw = entries
+            self._entries_for_interp_raw = entries_for_interp
+            self._coords_raw = coords
+            self._raw_data_initialized = True
+
+        return entries, time_interpolated, entries_for_interp, coords
+
+    def observe(self, t):
+        """
+        Evaluate the base variable at the given time points and y values.
+        """
+        if self.hermite_interpolation:
+            ts, ys, yps, funcs, is_f_contiguous = self._setup_cpp_inputs()
+            entries = self._observe_hermite_cpp(t, ts, ys, yps, funcs)
+            # print("_observe_hermite_cpp")
+            interpolated = True
+        elif self._linear_observable_cpp(t):
+            ts, ys, yps, funcs, is_f_contiguous = self._setup_cpp_inputs()
+            entries = self._observe_cpp(ts, ys, funcs, is_f_contiguous)
+            # print("_observe_cpp")
+            interpolated = False
+        else:
+            entries = self._observe_python()
+            # print("_observe_python")
+            interpolated = False
+
+        entries = self._observe_postfix(entries, t)
+        return entries, interpolated
+
+    def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
+        pass  # pragma: no cover
+
+    def _observe_cpp(self, ts, ys, funcs, is_f_contiguous):
+        pass  # pragma: no cover
+
+    def _observe_python(self):
+        pass  # pragma: no cover
+
+    def _observe_postfix(self, entries, t):
+        return entries
+
+    def _interp_setup(self, entries, t):
+        pass  # pragma: no cover
 
     def _process_spatial_variable_names(self, spatial_variable):
         if len(spatial_variable) == 0:
@@ -115,34 +178,75 @@ class ProcessedVariable:
                 f"Spatial variable name not recognized for {spatial_variable}"
             )
 
-    def _initialize_xr_data_array(self):
+    def _initialize_xr_data_array(self, entries, coords):
         """
         Initialize the xarray DataArray for interpolation. We don't do this by
         default as it has some overhead (~75 us) and sometimes we only need the entries
         of the processed variable, not the xarray object for interpolation.
         """
-        if self._entries_raw is None:
-            self.initialise()
-        entries_for_interp = self.entries_for_interp
-        coords = self.coords_for_interp
-        self._xr_data_array = xr.DataArray(entries_for_interp, coords=coords)
+        return xr.DataArray(entries, coords=coords)
 
     def __call__(self, t=None, x=None, r=None, y=None, z=None, R=None, warn=True):
         """
         Evaluate the variable at arbitrary *dimensional* t (and x, r, y, z and/or R),
         using interpolation
         """
-        if self._xr_data_array is None:
-            self._initialize_xr_data_array()
+        if self._xr_data_array_raw is None:
+            if not self._raw_data_initialized:
+                self.initialise(t=None)
+            self._xr_data_array_raw = self._initialize_xr_data_array(
+                self._entries_for_interp_raw, self._coords_raw
+            )
+
+        xr_data_array = self._xr_data_array_raw
         kwargs = {"t": t, "x": x, "r": r, "y": y, "z": z, "R": R}
         # Remove any None arguments
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
         # Use xarray interpolation, return numpy array
-        return self._xr_data_array.interp(**kwargs).values
+        return xr_data_array.interp(**kwargs).values
+
+    def _linear_observable_cpp(self, t):
+        """
+        For a small number of time points, it is faster to evaluate the base variable in
+        Python. For large number of time points, it is faster to evaluate the base
+        variable in C++.
+        """
+        return (t is not None) and pybamm.has_idaklu() and (np.asarray(t).size > 1)
+
+    def _observe_raw_data(self, t):
+        return (t is None) or (
+            np.asarray(t).size == len(self.t_pts)
+            and np.all(np.asarray(t) == self.t_pts)
+        )
+
+    def _setup_cpp_inputs(self):
+        ts = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ts)
+        ys = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ys)
+        if self.hermite_interpolation:
+            yps = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_yps)
+        else:
+            yps = None
+
+        # Generate the serialized C++ functions only once
+        funcs_unique = {}
+        funcs = [None] * len(self.base_variables_casadi)
+
+        for i, vars in enumerate(self.base_variables_casadi):
+            if vars not in funcs_unique:
+                funcs_unique[vars] = (
+                    pybamm.solvers.idaklu_solver.idaklu.generate_function(
+                        vars.serialize()
+                    )
+                )
+            funcs[i] = funcs_unique[vars]
+
+        is_f_contiguous = _is_f_contiguous(self.all_ys)
+
+        return ts, ys, yps, funcs, is_f_contiguous
 
     @property
     def entries(self):
-        if self._entries_raw is None:
+        if not self._raw_data_initialized:
             self.initialise()
         return self._entries_raw
 
@@ -256,7 +360,23 @@ class ProcessedVariable0D(ProcessedVariable):
             cumtrapz_ic=cumtrapz_ic,
         )
 
-    def observe(self):
+    def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
+        size0 = len(t)
+
+        inputs = self.all_inputs_casadi
+        return pybamm.solvers.idaklu_solver.idaklu.observe_interp_sorted_0D(
+            t, ts, ys, yps, inputs, funcs, size0
+        )
+
+    def _observe_cpp(self, ts, ys, funcs, is_f_contiguous):
+        size0 = len(self.t_pts)
+
+        inputs = self.all_inputs_casadi
+        return pybamm.solvers.idaklu_solver.idaklu.observe_0D(
+            ts, ys, inputs, funcs, is_f_contiguous, size0
+        )
+
+    def _observe_python(self):
         # initialise empty array of the correct size
         entries = np.empty(len(self.t_pts))
         idx = 0
@@ -270,60 +390,28 @@ class ProcessedVariable0D(ProcessedVariable):
                 entries[idx] = float(base_var_casadi(t, y, inputs))
 
                 idx += 1
-
-        if self.cumtrapz_ic is not None:
-            entries = cumulative_trapezoid(
-                entries, self.t_pts, initial=float(self.cumtrapz_ic)
-            )
         return entries
 
-    def _initialise(self, entries):
+    def _observe_postfix(self, entries, _):
+        if self.cumtrapz_ic is None:
+            return entries
+
+        return cumulative_trapezoid(
+            entries, self.t_pts, initial=float(self.cumtrapz_ic)
+        )
+
+    def _interp_setup(self, entries, t):
         # save attributes for interpolation
-        self.entries_for_interp = entries
-        self.coords_for_interp = {"t": self.t_pts}
+        entries_for_interp = entries
+        coords_for_interp = {"t": t}
 
-        self._entries_raw = entries
+        return entries_for_interp, coords_for_interp
 
-        return self.entries_for_interp, self.coords_for_interp
-
-    def _observe_in_cpp(self, all_ts):
-        """
-        For a small number of time points, it is faster to evaluate the base variable in
-        Python. For large number of time points, it is faster to evaluate the base
-        variable in C++.
-        """
-        return self.t_len(all_ts) > 1
-
-    def _setup_cpp_inputs(self, all_ts, all_ys, all_yps):
-        ts = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(all_ts)
-        ys = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(all_ys)
-        if not self.hermite_interpolation:
-            all_yps = np.array([])
-        yps = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(all_yps)
-
-        inputs = self.all_inputs_casadi
-
-        # Generate the serialized C++ functions only once
-        funcs_unique = {}
-        funcs = [None] * len(self.base_variables_casadi)
-
-        for i, vars in enumerate(self.base_variables_casadi):
-            if vars not in funcs_unique:
-                funcs_unique[vars] = (
-                    pybamm.solvers.idaklu_solver.idaklu.generate_function(
-                        vars.serialize()
-                    )
-                )
-            funcs[i] = funcs_unique[vars]
-
-        is_f_contiguous = _is_f_contiguous(self.all_ys)
-
-        return ts, ys, yps, inputs, funcs, is_f_contiguous
-
-
-#
-# Processed Variable class
-#
+    def __call__(self, t=None, *args, **kwargs):
+        entries, interpolated, _, _ = self.initialise(t)
+        if interpolated:
+            return entries
+        return super().__call__(*args, t=t, **kwargs)
 
 
 class ProcessedVariable1D(ProcessedVariable):
@@ -368,7 +456,25 @@ class ProcessedVariable1D(ProcessedVariable):
             cumtrapz_ic=cumtrapz_ic,
         )
 
-    def observe(self):
+    def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
+        size0 = len(t)
+        len_space = self.base_eval_shape[0]
+
+        inputs = self.all_inputs_casadi
+        return pybamm.solvers.idaklu_solver.idaklu.observe_interp_sorted_1D(
+            t, ts, ys, yps, inputs, funcs, size0, len_space
+        )
+
+    def _observe_cpp(self, ts, ys, funcs, is_f_contiguous):
+        size0 = len(self.t_pts)
+        len_space = self.base_eval_shape[0]
+
+        inputs = self.all_inputs_casadi
+        return pybamm.solvers.idaklu_solver.idaklu.observe_1D(
+            ts, ys, inputs, funcs, is_f_contiguous, size0, len_space
+        )
+
+    def _observe_python(self):
         len_space = self.base_eval_shape[0]
         entries = np.empty((len_space, len(self.t_pts)))
 
@@ -384,7 +490,7 @@ class ProcessedVariable1D(ProcessedVariable):
                 idx += 1
         return entries
 
-    def _initialise(self, entries, fixed_t=False):
+    def _interp_setup(self, entries, t, fixed_t=False):
         # Get node and edge values
         nodes = self.mesh.nodes
         edges = self.mesh.edges
@@ -404,7 +510,6 @@ class ProcessedVariable1D(ProcessedVariable):
         )
 
         # assign attributes for reference (either x_sol or r_sol)
-        self._entries_raw = entries
         self.spatial_variable_names = {
             k: self._process_spatial_variable_names(v)
             for k, v in self.spatial_variables.items()
@@ -419,10 +524,9 @@ class ProcessedVariable1D(ProcessedVariable):
         self.first_dim_pts = edges
 
         # save attributes for interpolation
-        self.entries_for_interp = entries_for_interp
-        self.coords_for_interp = {self.first_dimension: pts_for_interp, "t": self.t_pts}
+        coords_for_interp = {self.first_dimension: pts_for_interp, "t": t}
 
-        return self.entries_for_interp, self.coords_for_interp
+        return entries_for_interp, coords_for_interp
 
 
 class ProcessedVariable2D(ProcessedVariable):
@@ -467,7 +571,7 @@ class ProcessedVariable2D(ProcessedVariable):
             cumtrapz_ic=cumtrapz_ic,
         )
 
-    def observe(self):
+    def observe(self, t):
         """
         Initialise a 2D object that depends on x and r, x and z, x and R, or R and r.
         """
@@ -498,9 +602,10 @@ class ProcessedVariable2D(ProcessedVariable):
                     order="F",
                 )
                 idx += 1
-        return entries
+        interpolated = False
+        return entries, interpolated
 
-    def _initialise(self, entries):
+    def _interp_setup(self, entries, t):
         """
         Initialise a 2D object that depends on x and r, x and z, x and R, or R and r.
         """
@@ -571,7 +676,6 @@ class ProcessedVariable2D(ProcessedVariable):
         self.second_dimension = self.spatial_variable_names["secondary"]
 
         # assign attributes for reference
-        self._entries_raw = entries
         first_dim_pts_for_interp = first_dim_pts
         second_dim_pts_for_interp = second_dim_pts
 
@@ -580,14 +684,13 @@ class ProcessedVariable2D(ProcessedVariable):
         self.second_dim_pts = second_dim_edges
 
         # save attributes for interpolation
-        self.entries_for_interp = entries_for_interp
-        self.coords_for_interp = {
+        coords_for_interp = {
             self.first_dimension: first_dim_pts_for_interp,
             self.second_dimension: second_dim_pts_for_interp,
-            "t": self.t_pts,
+            "t": t,
         }
 
-        return self.entries_for_interp, self.coords_for_interp
+        return entries_for_interp, coords_for_interp
 
 
 class ProcessedVariable2DSciKitFEM(ProcessedVariable):
@@ -632,7 +735,7 @@ class ProcessedVariable2DSciKitFEM(ProcessedVariable):
             cumtrapz_ic=cumtrapz_ic,
         )
 
-    def observe(self):
+    def observe(self, _):
         y_sol = self.mesh.edges["y"]
         len_y = len(y_sol)
         z_sol = self.mesh.edges["z"]
@@ -653,14 +756,14 @@ class ProcessedVariable2DSciKitFEM(ProcessedVariable):
                     order="C",
                 )
                 idx += 1
-        return entries
+        interpolated = False
+        return entries, interpolated
 
-    def _initialise(self, entries):
+    def _interp_setup(self, entries, _):
         y_sol = self.mesh.edges["y"]
         z_sol = self.mesh.edges["z"]
 
         # assign attributes for reference
-        self._entries_raw = entries
         self.y_sol = y_sol
         self.z_sol = z_sol
         self.first_dimension = "y"
@@ -669,10 +772,12 @@ class ProcessedVariable2DSciKitFEM(ProcessedVariable):
         self.second_dim_pts = z_sol
 
         # save attributes for interpolation
-        self.entries_for_interp = entries
-        self.coords_for_interp = {"y": y_sol, "z": z_sol, "t": self.t_pts}
+        coords_for_interp = {"y": y_sol, "z": z_sol, "t": self.t_pts}
 
-        return self.entries_for_interp, self.coords_for_interp
+        return entries, coords_for_interp
+
+    def _observe_raw_data(self, t):
+        return True
 
 
 def process_variable(
@@ -681,8 +786,6 @@ def process_variable(
     mesh = base_variables[0].mesh
     domain = base_variables[0].domain
     domains = base_variables[0].domains
-    warn = warn
-    cumtrapz_ic = cumtrapz_ic
 
     # Process spatial variables
     geometry = solution.all_models[0].geometry
