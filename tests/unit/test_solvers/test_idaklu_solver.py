@@ -597,7 +597,7 @@ class TestIDAKLUSolver:
         solver = pybamm.IDAKLUSolver()
 
         t_eval = [0, 3]
-        with self.assertRaisesRegex(ValueError, "IDA failed with flag"):
+        with pytest.raises(ValueError, match="IDA failed with flag"):
             solver.solve(model, t_eval)
 
     def test_dae_solver_algebraic_model(self):

@@ -175,7 +175,7 @@ class QuickPlot:
             self.ts_seconds = [
                 np.unique(
                     np.sort(
-                        np.concatenate((sol.t, np.linspace(sol.t[0], sol.t[-1], 101)))
+                        np.concatenate((sol.t, np.linspace(sol.t[0], sol.t[-1], 100)))
                     )
                 )
                 for sol in solutions

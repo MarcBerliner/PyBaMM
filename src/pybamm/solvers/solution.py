@@ -11,7 +11,6 @@ import pybamm
 import pandas as pd
 from scipy.io import savemat
 from functools import cached_property
-from scipy.interpolate import CubicHermiteSpline
 
 
 class NumpyEncoder(json.JSONEncoder):
@@ -594,7 +593,7 @@ class Solution:
                 )
                 model._variables_casadi[variable] = var_casadi
             vars_casadi.append(var_casadi)
-        var = pybamm.ProcessedVariable(
+        var = pybamm.process_variable(
             vars_pybamm, vars_casadi, self, cumtrapz_ic=cumtrapz_ic
         )
 
@@ -907,8 +906,8 @@ class Solution:
             other.t_event,
             other.y_event,
             other.termination,
-            all_sensitivities,
-            all_yps,
+            all_sensitivities=all_sensitivities,
+            all_yps=all_yps,
         )
 
         new_sol.closest_event_idx = other.closest_event_idx
@@ -989,17 +988,6 @@ class Solution:
             show_plot=show_plot,
             **kwargs_fill,
         )
-
-    def _get_hermite_interpolators(self):
-        """
-        Set up the cubic Hermite spline interpolators
-        """
-        # Set up the Hermite interpolation
-        interpolants = [
-            CubicHermiteSpline(t, y, yp, axis=1)
-            for t, y, yp in zip(self.all_ts, self.all_ys, self.all_yps)
-        ]
-        return interpolants
 
 
 class EmptySolution:

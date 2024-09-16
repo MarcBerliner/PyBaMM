@@ -835,8 +835,8 @@ class IDAKLUSolver(pybamm.BaseSolver):
             np.array([sol.t[-1]]),
             np.transpose(y_event)[:, np.newaxis],
             termination,
-            yp,
-            sensitivities=yS_out,
+            all_sensitivities=yS_out,
+            all_yps=yp,
         )
 
         newsol.integration_time = integration_time

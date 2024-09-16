@@ -472,6 +472,10 @@ Solution IDAKLUSolverOpenMP<ExprSet>::solve(
     IDACalcIC(ida_mem, init_type, t_eval_next);
   }
 
+  if (sensitivity) {
+    CheckErrors(IDAGetSensDky(ida_mem, t_val, 0, yyS));
+  }
+
   // Set the initial stop time
   IDASetStopTime(ida_mem, t_eval_next);
 
