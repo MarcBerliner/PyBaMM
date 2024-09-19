@@ -164,8 +164,6 @@ void process_and_interp_sorted_time_series(
     vector<const double*> args;
     vector<double*> results;
 
-    const bool py_print = false;
-
     ssize_t N_data = 0;
     const ssize_t N_interp = t_interp.size();
 
@@ -174,7 +172,6 @@ void process_and_interp_sorted_time_series(
     }
 
     const bool cache_hermite_interp = N_interp > N_data;
-    if (py_print) py::print("cache_hermite_interp", cache_hermite_interp);
     vector<double> hermite_c;
     vector<double> hermite_d;
 
@@ -185,8 +182,6 @@ void process_and_interp_sorted_time_series(
         const auto inputs_i = inputs_np[i].data();
         const auto func_i = *funcs[i];
         const double t_data_final = t_data_i(t_data_i.size() - 1);  // Access last element
-
-        if (py_print) py::print("i step index", i);
 
         // Resize y_interp buffer to match the number of rows in y_data_i
         int M = y_data_i.shape(0);
@@ -201,41 +196,30 @@ void process_and_interp_sorted_time_series(
         ssize_t j = 0;
         t_interp_next = t_interp(i_interp);
         while (i_interp < N_interp && t_interp(i_interp) <= t_data_final) {
-
-            // Find the correct index j such that t_data_i(j) <= t_interp_next < t_data_i(j + 1)
-            while (j < t_data_i.size() - 2 && t_data_i(j) < t_interp_next) {
-                ++j;
+            // Find the correct index j such that t_data_i(j) <= t_interp_next <= t_data_i(j + 1)
+            for (; j < t_data_i.size() - 2; ++j) {
+                if (t_data_i(j) <= t_interp_next && t_interp_next <= t_data_i(j + 1)) {
+                    break;
+                }
             }
-
-            const double t_ij = t_data_i(j);
+            const double t_data_start = t_data_i(j);
+            const double t_data_next = t_data_i(j + 1);
 
             if (cache_hermite_interp) {
                 compute_c_d(hermite_c, hermite_d, t_data_i, y_data_i, yp_data_i, j);
             }
 
-            if (py_print) py::print("Hermite interp j", j);
-
-            // Find the number of steps within this interval
-            ssize_t N_interval = 0;
-            while ((i_interp + N_interval) < N_interp && t_interp(i_interp + N_interval) <= t_data_i(j + 1)) {
-                ++N_interval;
-            }
-
-            if (py_print) py::print("N_interval", N_interval);
-
             args = { &t_interp_next, y_interp.data(), inputs_i };
 
             // Perform Hermite interpolation for all valid t_interp values
-            for (ssize_t k = 0; k < N_interval; ++k) {
-                if (k == 0 && t_interp_next == t_ij) {
+            for (ssize_t k = 0; t_interp_next <= t_data_next; ++k) {
+                if (k == 0 && t_interp_next == t_data_start) {
                     apply_copy(y_interp, y_data_i, j);
                 } else if (cache_hermite_interp) {
-                    apply_hermite_interp(y_interp, t_interp_next, t_ij, y_data_i, yp_data_i, hermite_c, hermite_d, j);
+                    apply_hermite_interp(y_interp, t_interp_next, t_data_start, y_data_i, yp_data_i, hermite_c, hermite_d, j);
                 } else {
                     hermite_interp(y_interp, t_interp_next, t_data_i, y_data_i, yp_data_i, j);
                 }
-
-                if (py_print) py::print("t_interp_next", t_interp_next);
 
                 // Prepare CasADi function arguments
                 results = { &out[count] };
@@ -245,10 +229,57 @@ void process_and_interp_sorted_time_series(
 
                 count += len;
                 ++i_interp;  // Move to the next time step for interpolation
-                if (i_interp < N_interp) {
-                    t_interp_next = t_interp(i_interp);
+                if (i_interp >= N_interp) {
+                    return;
                 }
+                t_interp_next = t_interp(i_interp);
             }
+        }
+    }
+
+    // Extrapolate right if needed
+    if (i_interp < N_interp) {
+        const auto& t_data_i = ts_data_np[ts_data_np.size() - 1].unchecked<1>();
+        const auto& y_data_i = ys_data_np[ys_data_np.size() - 1].unchecked<2>();  // y_data_i is 2D
+        const auto& yp_data_i = yps_data_np[yps_data_np.size() - 1].unchecked<2>();  // yp_data_i is 2D
+        const auto inputs_i = inputs_np[inputs_np.size() - 1].data();
+        const auto func_i = *funcs[funcs.size() - 1];
+
+        const ssize_t j = t_data_i.size() - 2;
+        const double t_data_start = t_data_i(j);
+        const double t_data_final = t_data_i(j + 1);
+
+        // Resize y_interp buffer to match the number of rows in y_data_i
+        int M = y_data_i.shape(0);
+        if (y_interp.size() < M) {
+            y_interp.resize(M);
+            if (cache_hermite_interp) {
+                hermite_c.resize(M);
+                hermite_d.resize(M);
+            }
+        }
+
+        // Find the number of steps within this interval
+        args = { &t_interp_next, y_interp.data(), inputs_i };
+
+        // Perform Hermite interpolation for all valid t_interp values
+        for (; i_interp < N_interp; ++i_interp) {
+            t_interp_next = t_interp(i_interp);
+
+            if (cache_hermite_interp) {
+                compute_c_d(hermite_c, hermite_d, t_data_i, y_data_i, yp_data_i, j);
+                apply_hermite_interp(y_interp, t_interp_next, t_data_start, y_data_i, yp_data_i, hermite_c, hermite_d, j);
+            } else {
+                hermite_interp(y_interp, t_interp_next, t_data_i, y_data_i, yp_data_i, j);
+            }
+
+            // Prepare CasADi function arguments
+            results = { &out[count] };
+
+            // Call the CasADi function with the proper arguments
+            func_i(args, results);
+
+            count += len;
         }
     }
 }
@@ -259,7 +290,7 @@ void process_and_interp_sorted_time_series(
  * @brief Observe 0D variables
  */
 template<class ExprSet>
-const py::array_t<double> observe_interp_sorted_0D(
+const py::array_t<double> observe_hermite_interp_0D(
     const np_array& t_interp_np,
     const vector<np_array>& ts_np,
     const vector<np_array>& ys_np,
@@ -285,7 +316,7 @@ const py::array_t<double> observe_interp_sorted_0D(
  * @brief Observe 1D variables
  */
 template<class ExprSet>
-const py::array_t<double> observe_interp_sorted_1D(
+const py::array_t<double> observe_hermite_interp_1D(
     const np_array& t_interp_np,
     const vector<np_array>& ts_np,
     const vector<np_array>& ys_np,
@@ -310,7 +341,7 @@ const py::array_t<double> observe_interp_sorted_1D(
  * @brief Observe 2D variables
  */
 template<class ExprSet>
-const py::array_t<double> observe_interp_sorted_2D(
+const py::array_t<double> observe_hermite_interp_2D(
     const np_array& t_interp_np,
     const vector<np_array>& ts_np,
     const vector<np_array>& ys_np,

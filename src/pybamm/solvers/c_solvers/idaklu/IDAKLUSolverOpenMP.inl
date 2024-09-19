@@ -472,10 +472,6 @@ Solution IDAKLUSolverOpenMP<ExprSet>::solve(
     IDACalcIC(ida_mem, init_type, t_eval_next);
   }
 
-  if (sensitivity) {
-    CheckErrors(IDAGetSensDky(ida_mem, t_val, 0, yyS));
-  }
-
   // Set the initial stop time
   IDASetStopTime(ida_mem, t_eval_next);
 
@@ -483,14 +479,16 @@ Solution IDAKLUSolverOpenMP<ExprSet>::solve(
   // that we can run IDAGetDky at t0 for dky = 1
   int retval = IDASolve(ida_mem, tf, &t_val, yy, yyp, IDA_ONE_STEP);
 
-  // Store Consistent initialization
+  // Store consistent initialization
+  CheckErrors(IDAGetDky(ida_mem, t0, 0, yy));
+  if (sensitivity) {
+    CheckErrors(IDAGetSensDky(ida_mem, t0, 0, yyS));
+  }
+
   SetStep(t0, y_val, yp_val, yS_val, ypS_val, i_save);
 
-  // Reset the states and sensitivities at t = t_val
+  // Reset the states at t = t_val. Sensitivities are handled in the while-loop
   CheckErrors(IDAGetDky(ida_mem, t_val, 0, yy));
-  if (sensitivity) {
-    CheckErrors(IDAGetSensDky(ida_mem, t_val, 0, yyS));
-  }
 
   // Solve the system
   DEBUG("IDASolve");

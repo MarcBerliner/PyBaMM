@@ -43,9 +43,8 @@ class TestIDAKLUSolver:
             )
 
             # Test
-            t_eval = np.linspace(0, 3, 100)
-            t_interp = t_eval
-            solution = solver.solve(model, t_eval, t_interp=t_interp)
+            t_eval = [0, 3]
+            solution = solver.solve(model, t_eval)
 
             # test that final time is time of event
             # y = 0.1 t + y0 so y=0.2 when t=2
@@ -270,8 +269,7 @@ class TestIDAKLUSolver:
                     options={"jax_evaluator": "iree"} if form == "iree" else {},
                 )
 
-                t_interp = np.linspace(0, 3, 100)
-                t_eval = [t_interp[0], t_interp[-1]]
+                t_eval = [0, 3]
 
                 a_value = 0.1
 
@@ -280,7 +278,6 @@ class TestIDAKLUSolver:
                     t_eval,
                     inputs={"a": a_value},
                     calculate_sensitivities=True,
-                    t_interp=t_interp,
                 )
 
                 np.testing.assert_array_almost_equal(

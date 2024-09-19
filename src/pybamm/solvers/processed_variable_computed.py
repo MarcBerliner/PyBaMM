@@ -205,7 +205,7 @@ class ProcessedVariableComputed:
         self.entries = entries
         self.dimensions = 0
 
-    def initialise_1D(self, fixed_t=False):
+    def initialise_1D(self):
         entries = self.unroll_1D()
 
         # Get node and edge values

@@ -86,61 +86,70 @@ class ProcessedVariable:
         self._coords_raw = None
 
     def initialise(self, t=None):
-        observe_raw = self._observe_raw_data(t)
+        t_observe, observe_raw = self._observe_raw_data(t)
         if observe_raw and self._raw_data_initialized:
-            time_interpolated = False
-            return (
-                self._entries_raw,
-                time_interpolated,
-                self._entries_for_interp_raw,
-                self._coords_raw,
-            )
-
-        if observe_raw:
-            t_observe = self.t_pts
+            entries = self._entries_raw
+            is_interpolated = False
+            entries_for_interp = self._entries_for_interp_raw
+            coords = self._coords_raw
         else:
-            t_observe = np.asarray(t)
+            entries, is_interpolated = self.observe(t_observe, observe_raw)
+            entries_for_interp, coords = self._interp_setup(entries, t_observe)
 
-        entries, time_interpolated = self.observe(t_observe)
-        entries_for_interp, coords = self._interp_setup(entries, t_observe)
+            if (not self._raw_data_initialized) and observe_raw:
+                self._entries_raw = entries
+                self._entries_for_interp_raw = entries_for_interp
+                self._coords_raw = coords
+                self._raw_data_initialized = True
 
-        if observe_raw:
-            self._entries_raw = entries
-            self._entries_for_interp_raw = entries_for_interp
-            self._coords_raw = coords
-            self._raw_data_initialized = True
+        return t_observe, entries, is_interpolated, entries_for_interp, coords
 
-        return entries, time_interpolated, entries_for_interp, coords
-
-    def observe(self, t):
+    def observe(self, t, observe_raw):
         """
         Evaluate the base variable at the given time points and y values.
         """
-        if self.hermite_interpolation:
+
+        is_sorted = observe_raw or _is_sorted(t)
+        if not is_sorted:
+            idxs_sort = np.argsort(t)
+            t = t[idxs_sort]
+
+        if self.hermite_interpolation and not observe_raw:
+            self._check_interp(t)
             ts, ys, yps, funcs, is_f_contiguous = self._setup_cpp_inputs()
+
+            pybamm.logger.debug(
+                "Observing and Hermite interpolating the variable in C++"
+            )
             entries = self._observe_hermite_cpp(t, ts, ys, yps, funcs)
-            # print("_observe_hermite_cpp")
-            interpolated = True
+            is_interpolated = True
         elif self._linear_observable_cpp(t):
             ts, ys, yps, funcs, is_f_contiguous = self._setup_cpp_inputs()
-            entries = self._observe_cpp(ts, ys, funcs, is_f_contiguous)
-            # print("_observe_cpp")
-            interpolated = False
+
+            pybamm.logger.debug("Observing the variable raw data in C++")
+            entries = self._observe_raw_cpp(ts, ys, funcs, is_f_contiguous)
+            is_interpolated = False
         else:
-            entries = self._observe_python()
-            # print("_observe_python")
-            interpolated = False
+            pybamm.logger.debug("Observing the variable raw data in Python")
+            entries = self._observe_raw_python()
+            is_interpolated = False
+
+        if not is_sorted:
+            idxs_unsort = np.arange(len(t))[idxs_sort]
+
+            t = t[idxs_unsort]
+            entries = entries[..., idxs_unsort]
 
         entries = self._observe_postfix(entries, t)
-        return entries, interpolated
+        return entries, is_interpolated
 
     def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
         pass  # pragma: no cover
 
-    def _observe_cpp(self, ts, ys, funcs, is_f_contiguous):
+    def _observe_raw_cpp(self, ts, ys, funcs, is_f_contiguous):
         pass  # pragma: no cover
 
-    def _observe_python(self):
+    def _observe_raw_python(self):
         pass  # pragma: no cover
 
     def _observe_postfix(self, entries, t):
@@ -187,19 +196,65 @@ class ProcessedVariable:
         return xr.DataArray(entries, coords=coords)
 
     def __call__(self, t=None, x=None, r=None, y=None, z=None, R=None, warn=True):
+        t_observe, entries, is_interpolated, entries_for_interp, coords = (
+            self.initialise(t)
+        )
+
+        post_interpolate = (
+            (x is not None)
+            or (r is not None)
+            or (y is not None)
+            or (z is not None)
+            or (R is not None)
+        )
+
+        if is_interpolated and not post_interpolate:
+            return entries
+        return self._xr_interpolate(
+            t_observe,
+            entries_for_interp,
+            coords,
+            is_interpolated,
+            t,
+            x,
+            r,
+            y,
+            z,
+            R,
+            warn,
+        )
+
+    def _xr_interpolate(
+        self,
+        t_observe,
+        entries_for_interp,
+        coords,
+        is_interpolated,
+        t=None,
+        x=None,
+        r=None,
+        y=None,
+        z=None,
+        R=None,
+        warn=True,
+    ):
         """
         Evaluate the variable at arbitrary *dimensional* t (and x, r, y, z and/or R),
         using interpolation
         """
-        if self._xr_data_array_raw is None:
-            if not self._raw_data_initialized:
-                self.initialise(t=None)
-            self._xr_data_array_raw = self._initialize_xr_data_array(
-                self._entries_for_interp_raw, self._coords_raw
-            )
-
-        xr_data_array = self._xr_data_array_raw
+        if is_interpolated:
+            xr_data_array = self._initialize_xr_data_array(entries_for_interp, coords)
+        else:
+            if self._xr_data_array_raw is None:
+                if not self._raw_data_initialized:
+                    self.initialise(t=None)
+                self._xr_data_array_raw = self._initialize_xr_data_array(
+                    self._entries_for_interp_raw, self._coords_raw
+                )
+            xr_data_array = self._xr_data_array_raw
         kwargs = {"t": t, "x": x, "r": r, "y": y, "z": z, "R": R}
+        if is_interpolated:
+            kwargs["t"] = None
         # Remove any None arguments
         kwargs = {key: value for key, value in kwargs.items() if value is not None}
         # Use xarray interpolation, return numpy array
@@ -211,15 +266,27 @@ class ProcessedVariable:
         Python. For large number of time points, it is faster to evaluate the base
         variable in C++.
         """
-        return (t is not None) and pybamm.has_idaklu() and (np.asarray(t).size > 1)
+        return pybamm.has_idaklu() and (t is not None) and (np.asarray(t).size > 1)
 
     def _observe_raw_data(self, t):
-        return (t is None) or (
-            np.asarray(t).size == len(self.t_pts)
-            and np.all(np.asarray(t) == self.t_pts)
+        observe_raw = (t is None) or (
+            np.asarray(t).size == len(self.t_pts) and np.all(t == self.t_pts)
         )
 
+        if observe_raw:
+            t_observe = self.t_pts
+        elif not isinstance(t, np.ndarray):
+            if not isinstance(t, list):
+                t = [t]
+            t_observe = np.array(t)
+        else:
+            t_observe = t
+
+        return t_observe, observe_raw
+
     def _setup_cpp_inputs(self):
+        pybamm.logger.debug("Setting up C++ interpolation inputs")
+
         ts = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ts)
         ys = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ys)
         if self.hermite_interpolation:
@@ -244,8 +311,29 @@ class ProcessedVariable:
 
         return ts, ys, yps, funcs, is_f_contiguous
 
+    def _check_interp(self, t):
+        """
+        Check if the time points are sorted and unique
+
+        Args:
+            t (np.ndarray): array to check
+
+        Returns:
+            bool: True if array is sorted and unique
+        """
+        if t[0] < self.t_pts[0]:
+            raise ValueError(
+                "The interpolation points must be greater than or equal to the initial solution time"
+            )
+
     @property
     def entries(self):
+        """
+        Returns the raw data entries of the processed variable. This is the data that
+        is used for interpolation. If the processed variable has not been initialized
+        (i.e. the entries have not been calculated), then the processed variable is
+        initialized first.
+        """
         if not self._raw_data_initialized:
             self.initialise()
         return self._entries_raw
@@ -364,11 +452,11 @@ class ProcessedVariable0D(ProcessedVariable):
         size0 = len(t)
 
         inputs = self.all_inputs_casadi
-        return pybamm.solvers.idaklu_solver.idaklu.observe_interp_sorted_0D(
+        return pybamm.solvers.idaklu_solver.idaklu.observe_hermite_interp_0D(
             t, ts, ys, yps, inputs, funcs, size0
         )
 
-    def _observe_cpp(self, ts, ys, funcs, is_f_contiguous):
+    def _observe_raw_cpp(self, ts, ys, funcs, is_f_contiguous):
         size0 = len(self.t_pts)
 
         inputs = self.all_inputs_casadi
@@ -376,7 +464,7 @@ class ProcessedVariable0D(ProcessedVariable):
             ts, ys, inputs, funcs, is_f_contiguous, size0
         )
 
-    def _observe_python(self):
+    def _observe_raw_python(self):
         # initialise empty array of the correct size
         entries = np.empty(len(self.t_pts))
         idx = 0
@@ -406,12 +494,6 @@ class ProcessedVariable0D(ProcessedVariable):
         coords_for_interp = {"t": t}
 
         return entries_for_interp, coords_for_interp
-
-    def __call__(self, t=None, *args, **kwargs):
-        entries, interpolated, _, _ = self.initialise(t)
-        if interpolated:
-            return entries
-        return super().__call__(*args, t=t, **kwargs)
 
 
 class ProcessedVariable1D(ProcessedVariable):
@@ -461,11 +543,11 @@ class ProcessedVariable1D(ProcessedVariable):
         len_space = self.base_eval_shape[0]
 
         inputs = self.all_inputs_casadi
-        return pybamm.solvers.idaklu_solver.idaklu.observe_interp_sorted_1D(
+        return pybamm.solvers.idaklu_solver.idaklu.observe_hermite_interp_1D(
             t, ts, ys, yps, inputs, funcs, size0, len_space
         )
 
-    def _observe_cpp(self, ts, ys, funcs, is_f_contiguous):
+    def _observe_raw_cpp(self, ts, ys, funcs, is_f_contiguous):
         size0 = len(self.t_pts)
         len_space = self.base_eval_shape[0]
 
@@ -474,7 +556,7 @@ class ProcessedVariable1D(ProcessedVariable):
             ts, ys, inputs, funcs, is_f_contiguous, size0, len_space
         )
 
-    def _observe_python(self):
+    def _observe_raw_python(self):
         len_space = self.base_eval_shape[0]
         entries = np.empty((len_space, len(self.t_pts)))
 
@@ -490,7 +572,7 @@ class ProcessedVariable1D(ProcessedVariable):
                 idx += 1
         return entries
 
-    def _interp_setup(self, entries, t, fixed_t=False):
+    def _interp_setup(self, entries, t):
         # Get node and edge values
         nodes = self.mesh.nodes
         edges = self.mesh.edges
@@ -570,11 +652,6 @@ class ProcessedVariable2D(ProcessedVariable):
             warn=warn,
             cumtrapz_ic=cumtrapz_ic,
         )
-
-    def observe(self, t):
-        """
-        Initialise a 2D object that depends on x and r, x and z, x and R, or R and r.
-        """
         first_dim_nodes = self.mesh.nodes
         first_dim_edges = self.mesh.edges
         second_dim_nodes = self.base_variables[0].secondary_mesh.nodes
@@ -584,8 +661,42 @@ class ProcessedVariable2D(ProcessedVariable):
             first_dim_pts = first_dim_edges
 
         second_dim_pts = second_dim_nodes
-        first_dim_size = len(first_dim_pts)
-        second_dim_size = len(second_dim_pts)
+        self.first_dim_size = len(first_dim_pts)
+        self.second_dim_size = len(second_dim_pts)
+
+    def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
+        size0 = len(t)
+        first_dim_size = self.first_dim_size
+        second_dim_size = self.second_dim_size
+
+        inputs = self.all_inputs_casadi
+        return pybamm.solvers.idaklu_solver.idaklu.observe_hermite_interp_2D(
+            t, ts, ys, yps, inputs, funcs, size0, first_dim_size, second_dim_size
+        )
+
+    def _observe_raw_cpp(self, ts, ys, funcs, is_f_contiguous):
+        size0 = len(self.t_pts)
+        first_dim_size = self.first_dim_size
+        second_dim_size = self.second_dim_size
+
+        inputs = self.all_inputs_casadi
+        return pybamm.solvers.idaklu_solver.idaklu.observe_2D(
+            ts,
+            ys,
+            inputs,
+            funcs,
+            is_f_contiguous,
+            size0,
+            first_dim_size,
+            second_dim_size,
+        )
+
+    def _observe_raw_python(self):
+        """
+        Initialise a 2D object that depends on x and r, x and z, x and R, or R and r.
+        """
+        first_dim_size = self.first_dim_size
+        second_dim_size = self.second_dim_size
         entries = np.empty((first_dim_size, second_dim_size, len(self.t_pts)))
 
         # Evaluate the base_variable index-by-index
@@ -602,8 +713,7 @@ class ProcessedVariable2D(ProcessedVariable):
                     order="F",
                 )
                 idx += 1
-        interpolated = False
-        return entries, interpolated
+        return entries
 
     def _interp_setup(self, entries, t):
         """
@@ -693,7 +803,7 @@ class ProcessedVariable2D(ProcessedVariable):
         return entries_for_interp, coords_for_interp
 
 
-class ProcessedVariable2DSciKitFEM(ProcessedVariable):
+class ProcessedVariable2DSciKitFEM(ProcessedVariable2D):
     """
     An object that can be evaluated at arbitrary (scalars or vectors) t and x, and
     returns the (interpolated) value of the base variable at that t and x.
@@ -727,39 +837,20 @@ class ProcessedVariable2DSciKitFEM(ProcessedVariable):
         cumtrapz_ic=None,
     ):
         self.dimensions = 2
-        super().__init__(
+        super(ProcessedVariable2D, self).__init__(
             base_variables,
             base_variables_casadi,
             solution,
             warn=warn,
             cumtrapz_ic=cumtrapz_ic,
         )
-
-    def observe(self, _):
         y_sol = self.mesh.edges["y"]
-        len_y = len(y_sol)
         z_sol = self.mesh.edges["z"]
-        len_z = len(z_sol)
-        entries = np.empty((len_y, len_z, len(self.t_pts)))
 
-        # Evaluate the base_variable index-by-index
-        idx = 0
-        for ts, ys, inputs, base_var_casadi in zip(
-            self.all_ts, self.all_ys, self.all_inputs_casadi, self.base_variables_casadi
-        ):
-            for inner_idx, t in enumerate(ts):
-                t = ts[inner_idx]
-                y = ys[:, inner_idx]
-                entries[:, :, idx] = np.reshape(
-                    base_var_casadi(t, y, inputs).full(),
-                    [len_y, len_z],
-                    order="C",
-                )
-                idx += 1
-        interpolated = False
-        return entries, interpolated
+        self.first_dim_size = len(y_sol)
+        self.second_dim_size = len(z_sol)
 
-    def _interp_setup(self, entries, _):
+    def _interp_setup(self, entries, t):
         y_sol = self.mesh.edges["y"]
         z_sol = self.mesh.edges["z"]
 
@@ -772,29 +863,14 @@ class ProcessedVariable2DSciKitFEM(ProcessedVariable):
         self.second_dim_pts = z_sol
 
         # save attributes for interpolation
-        coords_for_interp = {"y": y_sol, "z": z_sol, "t": self.t_pts}
+        coords_for_interp = {"y": y_sol, "z": z_sol, "t": t}
 
         return entries, coords_for_interp
 
-    def _observe_raw_data(self, t):
-        return True
 
-
-def process_variable(
-    base_variables, base_variables_casadi, solution, warn=True, cumtrapz_ic=None
-):
+def process_variable(base_variables, *args, **kwargs):
     mesh = base_variables[0].mesh
     domain = base_variables[0].domain
-    domains = base_variables[0].domains
-
-    # Process spatial variables
-    geometry = solution.all_models[0].geometry
-    spatial_variables = {}
-    for domain_level, domain_names in domains.items():
-        variables = []
-        for domain in domain_names:
-            variables += list(geometry[domain].keys())
-        spatial_variables[domain_level] = variables
 
     # Evaluate base variable at initial time
     base_eval_shape = base_variables[0].shape
@@ -806,23 +882,17 @@ def process_variable(
         and "current collector" in domain
         and isinstance(mesh, pybamm.ScikitSubMesh2D)
     ):
-        return ProcessedVariable2DSciKitFEM(
-            base_variables, base_variables_casadi, solution, warn, cumtrapz_ic
-        )
+        return ProcessedVariable2DSciKitFEM(base_variables, *args, **kwargs)
 
     # check variable shape
     if len(base_eval_shape) == 0 or base_eval_shape[0] == 1:
-        return ProcessedVariable0D(
-            base_variables, base_variables_casadi, solution, warn, cumtrapz_ic
-        )
+        return ProcessedVariable0D(base_variables, *args, **kwargs)
 
     n = mesh.npts
     base_shape = base_eval_shape[0]
     # Try some shapes that could make the variable a 1D variable
     if base_shape in [n, n + 1]:
-        return ProcessedVariable1D(
-            base_variables, base_variables_casadi, solution, warn, cumtrapz_ic
-        )
+        return ProcessedVariable1D(base_variables, *args, **kwargs)
 
     # Try some shapes that could make the variable a 2D variable
     first_dim_nodes = mesh.nodes
@@ -832,9 +902,7 @@ def process_variable(
         len(first_dim_nodes),
         len(first_dim_edges),
     ]:
-        return ProcessedVariable2D(
-            base_variables, base_variables_casadi, solution, warn, cumtrapz_ic
-        )
+        return ProcessedVariable2D(base_variables, *args, **kwargs)
 
     # Raise error for 3D variable
     raise NotImplementedError(
@@ -855,3 +923,16 @@ def _is_f_contiguous(all_ys):
     """
 
     return all(isinstance(y, np.ndarray) and y.data.f_contiguous for y in all_ys)
+
+
+def _is_sorted(t):
+    """
+    Check if an array is sorted
+
+    Args:
+        t (np.ndarray): array to check
+
+    Returns:
+        bool: True if array is sorted
+    """
+    return np.all(t[:-1] <= t[1:])

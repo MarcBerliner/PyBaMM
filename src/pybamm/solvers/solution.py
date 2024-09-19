@@ -134,7 +134,7 @@ class Solution:
 
         # initialize empty variables and data
         self._variables = pybamm.FuzzyDict()
-        self.data = pybamm.FuzzyDict()
+        self._data = pybamm.FuzzyDict()
 
         # Add self as sub-solution for compatibility with ProcessedVariable
         self._sub_solutions = [self]
@@ -305,6 +305,13 @@ class Solution:
             return self._y
 
     @property
+    def data(self):
+        for k, v in self._variables.items():
+            if k not in self._data:
+                self._data[k] = v.data
+        return self._data
+
+    @property
     def sensitivities(self):
         """Values of the sensitivities. Returns a dict of param_name: np_array"""
         try:
@@ -448,6 +455,12 @@ class Solution:
             n_states = self.all_models[0].len_rhs_and_alg
             for key in self._all_sensitivities:
                 sensitivities[key] = self._all_sensitivities[key][0][-n_states:, :]
+
+        if self.all_yps is None:
+            all_yps = None
+        else:
+            all_yps = self.all_yps[0][:, :1]
+
         new_sol = Solution(
             self.all_ts[0][:1],
             self.all_ys[0][:, :1],
@@ -457,6 +470,7 @@ class Solution:
             None,
             "final time",
             all_sensitivities=sensitivities,
+            all_yps=all_yps,
         )
         new_sol._all_inputs_casadi = self.all_inputs_casadi[:1]
         new_sol._sub_solutions = self.sub_solutions[:1]
@@ -481,6 +495,12 @@ class Solution:
             n_states = self.all_models[-1].len_rhs_and_alg
             for key in self._all_sensitivities:
                 sensitivities[key] = self._all_sensitivities[key][-1][-n_states:, :]
+
+        if self.all_yps is None:
+            all_yps = None
+        else:
+            all_yps = self.all_yps[-1][:, -1:]
+
         new_sol = Solution(
             self.all_ts[-1][-1:],
             self.all_ys[-1][:, -1:],
@@ -490,6 +510,7 @@ class Solution:
             self.y_event,
             self.termination,
             all_sensitivities=sensitivities,
+            all_yps=all_yps,
         )
         new_sol._all_inputs_casadi = self.all_inputs_casadi[-1:]
         new_sol._sub_solutions = self.sub_solutions[-1:]
@@ -597,9 +618,8 @@ class Solution:
             vars_pybamm, vars_casadi, self, cumtrapz_ic=cumtrapz_ic
         )
 
-        # Save variable and data
+        # Save variable
         self._variables[variable] = var
-        self.data[variable] = var.data
 
     def process_casadi_var(self, var_pybamm, inputs, ys_shape):
         t_MX = casadi.MX.sym("t")

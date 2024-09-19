@@ -61,9 +61,19 @@ class TestQuickPlot:
         disc.process_model(model)
         solver = model.default_solver
         t_eval = np.linspace(0, 2, 201)
-        t_linspace = np.linspace(t_eval[0], t_eval[-1], 100)
-        t_plot = np.sort(np.unique(np.concatenate((t_eval, t_linspace))))
-        solution = solver.solve(model, t_eval)
+        if solver.supports_interp:
+            t_interp = t_eval
+        else:
+            t_interp = None
+
+        solution = solver.solve(model, t_eval, t_interp=t_interp)
+
+        if solution.hermite_interpolation:
+            t_linspace = np.linspace(t_eval[0], t_eval[-1], 100)
+            t_plot = np.union1d(t_eval, t_linspace)
+        else:
+            t_plot = t_eval
+
         quick_plot = pybamm.QuickPlot(
             solution,
             [

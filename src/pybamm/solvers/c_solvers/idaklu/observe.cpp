@@ -53,6 +53,8 @@ void hermite_interp_no_y(
     const py::detail::unchecked_reference<double, 2>& yp,
     const size_t j
 ) {
+    // This begins from a copy of y, so we don't need to copy y
+    // once again
     const double h = t_interp - t(j);
     const double h2 = h * h;
     const double h3 = h2 * h;
@@ -69,9 +71,6 @@ void hermite_interp_no_y(
         yp_ij = yp(i, j);
         y_ijp1 = y(i, j + 1);
         yp_ijp1 = yp(i, j + 1);
-
-        // c[i] = (3 * (y_ptr[i + 1] - y_ptr[i]) * inv_h_sq) - (2 * yp_ptr[i] + yp_ptr[i + 1]) * inv_h;
-        // d[i] = (2 * (y_ptr[i] - y_ptr[i + 1]) * inv_h_sq * inv_h) + (yp_ptr[i] + yp_ptr[i + 1]) * inv_h_sq;
 
         c = 3 * (y_ijp1 - y_ij) * inv_h2 - (2 * yp_ij + yp_ijp1) * inv_h;
         d = 2 * (y_ij - y_ijp1) * inv_h3 + (yp_ij + yp_ijp1) * inv_h2;
