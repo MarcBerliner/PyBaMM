@@ -669,9 +669,9 @@ void IDAKLUSolverOpenMP<ExprSet>::ExtendHermiteArrays() {
 template <class ExprSet>
 void IDAKLUSolverOpenMP<ExprSet>::ReinitializeIntegrator(const realtype& t_val) {
   DEBUG("IDAKLUSolver::ReinitializeIntegrator");
-  CheckErrors(IDAReInit(ida_mem, t_val, yy, yp));
+  CheckErrors(IDAReInit(ida_mem, t_val, yy, yyp));
   if (sensitivity) {
-    CheckErrors(IDASensReInit(ida_mem, IDA_SIMULTANEOUS, yyS, ypS));
+    CheckErrors(IDASensReInit(ida_mem, IDA_SIMULTANEOUS, yyS, yypS));
   }
 }
 
@@ -710,7 +710,7 @@ void IDAKLUSolverOpenMP<ExprSet>::ConsistentInitializationODE(
   realtype *y_cache_val = N_VGetArrayPointer(y_cache);
   std::memset(y_cache_val, 0, number_of_states * sizeof(realtype));
   // Overwrite yp
-  residual_eval<ExprSet>(t_val, yy, y_cache, yp, functions.get());
+  residual_eval<ExprSet>(t_val, yy, y_cache, yyp, functions.get());
 }
 
 template <class ExprSet>

@@ -54,7 +54,7 @@ public:
   int const number_of_events;  // cppcheck-suppress unusedStructMember
   int number_of_timesteps;
   int precon_type;  // cppcheck-suppress unusedStructMember
-  N_Vector yy, yp, y_cache, avtol;  // y, y', y cache vector, and absolute tolerance
+  N_Vector yy, yyp, y_cache, avtol;  // y, y', y cache vector, and absolute tolerance
   N_Vector *yyS;  // cppcheck-suppress unusedStructMember
   N_Vector *yypS;  // cppcheck-suppress unusedStructMember
   N_Vector id;              // rhs_alg_id
