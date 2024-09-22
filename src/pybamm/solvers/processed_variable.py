@@ -138,6 +138,39 @@ class ProcessedVariable:
         entries = self._observe_postfix(entries, t)
         return entries, is_interpolated
 
+    def _setup_cpp_inputs(self):
+        pybamm.logger.debug("Setting up C++ interpolation inputs")
+
+        ts = pybamm.solvers.idaklu_solver.idaklu.VectorRealtypeNdArray(self.all_ts)
+        ys = pybamm.solvers.idaklu_solver.idaklu.VectorRealtypeNdArray(self.all_ys)
+        if self.hermite_interpolation:
+            yps = pybamm.solvers.idaklu_solver.idaklu.VectorRealtypeNdArray(
+                self.all_yps
+            )
+        else:
+            yps = None
+
+        # Generate the serialized C++ functions only once
+        funcs_unique = {}
+        funcs = [None] * len(self.base_variables_casadi)
+
+        for i, vars in enumerate(self.base_variables_casadi):
+            if vars not in funcs_unique:
+                funcs_unique[vars] = (
+                    pybamm.solvers.idaklu_solver.idaklu.generate_function(
+                        vars.serialize()
+                    )
+                )
+            funcs[i] = funcs_unique[vars]
+
+        inputs = pybamm.solvers.idaklu_solver.idaklu.VectorRealtypeNdArray(
+            self.all_inputs_casadi
+        )
+
+        is_f_contiguous = _is_f_contiguous(self.all_ys)
+
+        return ts, ys, yps, funcs, inputs, is_f_contiguous
+
     def _observe_hermite_cpp(self, t):
         self._check_interp(t)
 
@@ -292,35 +325,6 @@ class ProcessedVariable:
             t_observe = t
 
         return t_observe, observe_raw
-
-    def _setup_cpp_inputs(self):
-        pybamm.logger.debug("Setting up C++ interpolation inputs")
-
-        ts = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ts)
-        ys = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_ys)
-        if self.hermite_interpolation:
-            yps = pybamm.solvers.idaklu_solver.idaklu.VectorNdArray(self.all_yps)
-        else:
-            yps = None
-
-        # Generate the serialized C++ functions only once
-        funcs_unique = {}
-        funcs = [None] * len(self.base_variables_casadi)
-
-        for i, vars in enumerate(self.base_variables_casadi):
-            if vars not in funcs_unique:
-                funcs_unique[vars] = (
-                    pybamm.solvers.idaklu_solver.idaklu.generate_function(
-                        vars.serialize()
-                    )
-                )
-            funcs[i] = funcs_unique[vars]
-
-        inputs = self.all_inputs_casadi
-
-        is_f_contiguous = _is_f_contiguous(self.all_ys)
-
-        return ts, ys, yps, funcs, inputs, is_f_contiguous
 
     def _check_interp(self, t):
         """

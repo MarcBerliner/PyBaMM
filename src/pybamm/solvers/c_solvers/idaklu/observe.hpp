@@ -23,9 +23,9 @@ void apply_copy(
  */
 template<class ExprSet>
 void process_time_series(
-    const vector<np_array>& ts_np,
-    const vector<np_array>& ys_np,
-    const vector<np_array_dense>& inputs_np,
+    const vector<np_array_realtype>& ts_np,
+    const vector<np_array_realtype>& ys_np,
+    const vector<np_array_realtype>& inputs_np,
     const vector<const typename ExprSet::BaseFunctionType*>& funcs,
     double* out,
     const bool is_f_contiguous,
@@ -142,11 +142,11 @@ void apply_hermite_interp(
  */
 template<class ExprSet>
 void process_and_interp_sorted_time_series(
-    const np_array& t_interp_np,
-    const vector<np_array>& ts_data_np,
-    const vector<np_array>& ys_data_np,
-    const vector<np_array>& yps_data_np,
-    const vector<np_array_dense>& inputs_np,
+    const np_array_realtype& t_interp_np,
+    const vector<np_array_realtype>& ts_data_np,
+    const vector<np_array_realtype>& ys_data_np,
+    const vector<np_array_realtype>& yps_data_np,
+    const vector<np_array_realtype>& inputs_np,
     const vector<const typename ExprSet::BaseFunctionType*>& funcs,
     double* out,
     const int len
@@ -292,11 +292,11 @@ const int _setup_observables(const vector<int>& sizes);
  */
 template<class ExprSet>
 const py::array_t<double> observe_hermite_interp_ND(
-    const np_array& t_interp_np,
-    const vector<np_array>& ts_np,
-    const vector<np_array>& ys_np,
-    const vector<np_array>& yps_np,
-    const vector<np_array_dense>& inputs_np,
+    const np_array_realtype& t_interp_np,
+    const vector<np_array_realtype>& ts_np,
+    const vector<np_array_realtype>& ys_np,
+    const vector<np_array_realtype>& yps_np,
+    const vector<np_array_realtype>& inputs_np,
     const vector<const typename ExprSet::BaseFunctionType*>& funcs,
     const vector<int> sizes
 ) {
@@ -318,9 +318,9 @@ const py::array_t<double> observe_hermite_interp_ND(
  */
 template<class ExprSet>
 const py::array_t<double> observe_ND(
-    const vector<np_array>& ts_np,
-    const vector<np_array>& ys_np,
-    const vector<np_array_dense>& inputs_np,
+    const vector<np_array_realtype>& ts_np,
+    const vector<np_array_realtype>& ys_np,
+    const vector<np_array_realtype>& inputs_np,
     const vector<const typename ExprSet::BaseFunctionType*>& funcs,
     const bool is_f_contiguous,
     const vector<int> sizes
