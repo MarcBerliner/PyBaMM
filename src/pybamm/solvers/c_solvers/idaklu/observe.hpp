@@ -12,6 +12,12 @@
 
 namespace py = pybind11;
 
+void apply_copy(
+    std::vector<double>& out,
+    const py::detail::unchecked_reference<double, 2>& y,
+    const size_t j
+);
+
 /**
  * @brief Loops over the solution and generates the observable output
  */
@@ -45,9 +51,7 @@ void process_time_series(
 
             // Use a view of y_i
             if (!is_f_contiguous) {
-                for (int k = 0; k < M; k++) {
-                    y_buffer[k] = y_i(k, j);
-                }
+                apply_copy(y_buffer, y_i, j);
             }
             const double* y_ij = is_f_contiguous ? &y_i(0, j) : y_buffer.data();
 
@@ -122,12 +126,6 @@ void compute_c_d(
     const size_t j
 );
 
-void apply_copy(
-    std::vector<double>& out,
-    const py::detail::unchecked_reference<double, 2>& y,
-    const size_t j
-);
-
 void apply_hermite_interp(
     std::vector<double>& out,
     const double t_interp,
@@ -196,7 +194,7 @@ void process_and_interp_sorted_time_series(
         ssize_t j = 0;
         t_interp_next = t_interp(i_interp);
         while (i_interp < N_interp && t_interp(i_interp) <= t_data_final) {
-            // Find the correct index j such that t_data_i(j) <= t_interp_next <= t_data_i(j + 1)
+            // Find the correct index j
             for (; j < t_data_i.size() - 2; ++j) {
                 if (t_data_i(j) <= t_interp_next && t_interp_next <= t_data_i(j + 1)) {
                     break;
@@ -237,201 +235,103 @@ void process_and_interp_sorted_time_series(
         }
     }
 
+    if (i_interp == N_interp) {
+        return;
+    }
+
     // Extrapolate right if needed
-    if (i_interp < N_interp) {
-        const auto& t_data_i = ts_data_np[ts_data_np.size() - 1].unchecked<1>();
-        const auto& y_data_i = ys_data_np[ys_data_np.size() - 1].unchecked<2>();  // y_data_i is 2D
-        const auto& yp_data_i = yps_data_np[yps_data_np.size() - 1].unchecked<2>();  // yp_data_i is 2D
-        const auto inputs_i = inputs_np[inputs_np.size() - 1].data();
-        const auto func_i = *funcs[funcs.size() - 1];
+    const auto& t_data_i = ts_data_np[ts_data_np.size() - 1].unchecked<1>();
+    const auto& y_data_i = ys_data_np[ys_data_np.size() - 1].unchecked<2>();  // y_data_i is 2D
+    const auto& yp_data_i = yps_data_np[yps_data_np.size() - 1].unchecked<2>();  // yp_data_i is 2D
+    const auto inputs_i = inputs_np[inputs_np.size() - 1].data();
+    const auto func_i = *funcs[funcs.size() - 1];
 
-        const ssize_t j = t_data_i.size() - 2;
-        const double t_data_start = t_data_i(j);
-        const double t_data_final = t_data_i(j + 1);
+    const ssize_t j = t_data_i.size() - 2;
+    const double t_data_start = t_data_i(j);
+    const double t_data_final = t_data_i(j + 1);
 
-        // Resize y_interp buffer to match the number of rows in y_data_i
-        int M = y_data_i.shape(0);
-        if (y_interp.size() < M) {
-            y_interp.resize(M);
-            if (cache_hermite_interp) {
-                hermite_c.resize(M);
-                hermite_d.resize(M);
-            }
+    // Resize y_interp buffer to match the number of rows in y_data_i
+    int M = y_data_i.shape(0);
+    if (y_interp.size() < M) {
+        y_interp.resize(M);
+        if (cache_hermite_interp) {
+            hermite_c.resize(M);
+            hermite_d.resize(M);
+        }
+    }
+
+    // Find the number of steps within this interval
+    args = { &t_interp_next, y_interp.data(), inputs_i };
+
+    // Perform Hermite interpolation for all valid t_interp values
+    for (; i_interp < N_interp; ++i_interp) {
+        t_interp_next = t_interp(i_interp);
+
+        if (cache_hermite_interp) {
+            compute_c_d(hermite_c, hermite_d, t_data_i, y_data_i, yp_data_i, j);
+            apply_hermite_interp(y_interp, t_interp_next, t_data_start, y_data_i, yp_data_i, hermite_c, hermite_d, j);
+        } else {
+            hermite_interp(y_interp, t_interp_next, t_data_i, y_data_i, yp_data_i, j);
         }
 
-        // Find the number of steps within this interval
-        args = { &t_interp_next, y_interp.data(), inputs_i };
+        // Prepare CasADi function arguments
+        results = { &out[count] };
 
-        // Perform Hermite interpolation for all valid t_interp values
-        for (; i_interp < N_interp; ++i_interp) {
-            t_interp_next = t_interp(i_interp);
+        // Call the CasADi function with the proper arguments
+        func_i(args, results);
 
-            if (cache_hermite_interp) {
-                compute_c_d(hermite_c, hermite_d, t_data_i, y_data_i, yp_data_i, j);
-                apply_hermite_interp(y_interp, t_interp_next, t_data_start, y_data_i, yp_data_i, hermite_c, hermite_d, j);
-            } else {
-                hermite_interp(y_interp, t_interp_next, t_data_i, y_data_i, yp_data_i, j);
-            }
-
-            // Prepare CasADi function arguments
-            results = { &out[count] };
-
-            // Call the CasADi function with the proper arguments
-            func_i(args, results);
-
-            count += len;
-        }
+        count += len;
     }
 }
 
+const int _setup_observables(const vector<int>& sizes);
 
 
 /**
- * @brief Observe 0D variables
+ * @brief Observe and Hermite interpolate ND variables
  */
 template<class ExprSet>
-const py::array_t<double> observe_hermite_interp_0D(
+const py::array_t<double> observe_hermite_interp_ND(
     const np_array& t_interp_np,
     const vector<np_array>& ts_np,
     const vector<np_array>& ys_np,
     const vector<np_array>& yps_np,
     const vector<np_array_dense>& inputs_np,
     const vector<const typename ExprSet::BaseFunctionType*>& funcs,
-    const int size0
+    const vector<int> sizes
 ) {
-    // Create a numpy array to manage the output
-    py::array_t<double> out_array(size0);
+    const int size_tot = _setup_observables(sizes);
+
+    py::array_t<double, py::array::f_style> out_array(sizes);
     auto out = out_array.mutable_data();
 
     process_and_interp_sorted_time_series<ExprSet>(
-        t_interp_np, ts_np, ys_np, yps_np, inputs_np, funcs, out, 1
+        t_interp_np, ts_np, ys_np, yps_np, inputs_np, funcs, out, size_tot / sizes.back()
     );
 
     return out_array;
 }
 
 
-
 /**
- * @brief Observe 1D variables
+ * @brief Observe ND variables
  */
 template<class ExprSet>
-const py::array_t<double> observe_hermite_interp_1D(
-    const np_array& t_interp_np,
-    const vector<np_array>& ts_np,
-    const vector<np_array>& ys_np,
-    const vector<np_array>& yps_np,
-    const vector<np_array_dense>& inputs_np,
-    const vector<const typename ExprSet::BaseFunctionType*>& funcs,
-    const int size0,
-    const int size1
-) {
-    // Create a numpy array to manage the output
-    py::array_t<double, py::array::f_style> out_array({size1, size0});
-    auto out = out_array.mutable_data();
-
-    process_and_interp_sorted_time_series<ExprSet>(
-        t_interp_np, ts_np, ys_np, yps_np, inputs_np, funcs, out, size1
-    );
-
-    return out_array;
-}
-
-/**
- * @brief Observe 2D variables
- */
-template<class ExprSet>
-const py::array_t<double> observe_hermite_interp_2D(
-    const np_array& t_interp_np,
-    const vector<np_array>& ts_np,
-    const vector<np_array>& ys_np,
-    const vector<np_array>& yps_np,
-    const vector<np_array_dense>& inputs_np,
-    const vector<const typename ExprSet::BaseFunctionType*>& funcs,
-    const int size0,
-    const int size1,
-    const int size2
-) {
-    // Create a numpy array to manage the output
-    py::array_t<double, py::array::f_style> out_array({size1, size2, size0});
-    auto out = out_array.mutable_data();
-
-    process_and_interp_sorted_time_series<ExprSet>(
-        t_interp_np, ts_np, ys_np, yps_np, inputs_np, funcs, out, size1 * size2
-    );
-
-    return out_array;
-}
-
-
-
-/**
- * @brief Observe 0D variables
- */
-template<class ExprSet>
-const py::array_t<double> observe_0D(
+const py::array_t<double> observe_ND(
     const vector<np_array>& ts_np,
     const vector<np_array>& ys_np,
     const vector<np_array_dense>& inputs_np,
     const vector<const typename ExprSet::BaseFunctionType*>& funcs,
     const bool is_f_contiguous,
-    const int size0
+    const vector<int> sizes
 ) {
-    // Create a numpy array to manage the output
-    py::array_t<double> out_array(size0);
+    const int size_tot = _setup_observables(sizes);
+
+    py::array_t<double, py::array::f_style> out_array(sizes);
     auto out = out_array.mutable_data();
 
     process_time_series<ExprSet>(
-        ts_np, ys_np, inputs_np, funcs, out, is_f_contiguous, 1
-    );
-
-    return out_array;
-}
-
-/**
- * @brief Observe 1D variables
- */
-template<class ExprSet>
-const py::array_t<double> observe_1D(
-    const vector<np_array>& ts_np,
-    const vector<np_array>& ys_np,
-    const vector<np_array_dense>& inputs_np,
-    const vector<const typename ExprSet::BaseFunctionType*>& funcs,
-    const bool is_f_contiguous,
-    const int size0,
-    const int size1
-) {
-    // Create a numpy array to manage the output
-    py::array_t<double, py::array::f_style> out_array({size1, size0});
-    auto out = out_array.mutable_data();
-
-    process_time_series<ExprSet>(
-        ts_np, ys_np, inputs_np, funcs, out, is_f_contiguous, size1
-    );
-
-    return out_array;
-}
-
-/**
- * @brief Observe 2D variables
- */
-template<class ExprSet>
-const py::array_t<double> observe_2D(
-    const vector<np_array>& ts_np,
-    const vector<np_array>& ys_np,
-    const vector<np_array_dense>& inputs_np,
-    const vector<const typename ExprSet::BaseFunctionType*>& funcs,
-    const bool is_f_contiguous,
-    const int size0,
-    const int size1,
-    const int size2
-) {
-    // Create a numpy array to manage the output
-    py::array_t<double, py::array::f_style> out_array({size1, size2, size0});
-    auto out = out_array.mutable_data();
-
-    process_time_series<ExprSet>(
-        ts_np, ys_np, inputs_np, funcs, out, is_f_contiguous, size1 * size2
+        ts_np, ys_np, inputs_np, funcs, out, is_f_contiguous, size_tot / sizes.back()
     );
 
     return out_array;

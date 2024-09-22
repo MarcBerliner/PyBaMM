@@ -173,3 +173,22 @@ const double hermite_interp_scalar(
 
     return y_j + yp_j * h + c * h2 + d * h3;
 }
+
+const int _setup_observables(const vector<int>& sizes) {
+    // Create a numpy array to manage the output
+    if (sizes.size() == 0) {
+        throw std::invalid_argument("sizes must have at least one element");
+    }
+
+    // Create a numpy array to manage the output
+    int size_tot = 1;
+    for (const auto& size : sizes) {
+        size_tot *= size;
+    }
+
+    if (size_tot == 0) {
+        throw std::invalid_argument("sizes must have at least one element");
+    }
+
+    return size_tot;
+}

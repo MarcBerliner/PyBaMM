@@ -73,73 +73,25 @@ PYBIND11_MODULE(idaklu, m)
     py::arg("options"),
     py::return_value_policy::take_ownership);
 
-  m.def("observe_0D", &observe_0D<CasadiFunctions>,
-    "Observe 0D variables",
+  m.def("observe_ND", &observe_ND<CasadiFunctions>,
+    "Observe ND variables",
     py::arg("ts_np"),
     py::arg("ys_np"),
     py::arg("inputs_np"),
     py::arg("funcs"),
     py::arg("is_f_contiguous"),
-    py::arg("size0"),
+    py::arg("sizes"),
     py::return_value_policy::take_ownership);
 
-  m.def("observe_hermite_interp_0D", &observe_hermite_interp_0D<CasadiFunctions>,
-    "Observe 0D variables",
+  m.def("observe_hermite_interp_ND", &observe_hermite_interp_ND<CasadiFunctions>,
+    "Observe ND variables",
     py::arg("t_interp_np"),
     py::arg("ts_np"),
     py::arg("ys_np"),
     py::arg("yps_np"),
     py::arg("inputs_np"),
     py::arg("funcs"),
-    py::arg("size0"),
-    py::return_value_policy::take_ownership);
-
-  m.def("observe_hermite_interp_1D", &observe_hermite_interp_1D<CasadiFunctions>,
-    "Observe 1D variables",
-    py::arg("t_interp_np"),
-    py::arg("ts_np"),
-    py::arg("ys_np"),
-    py::arg("yps_np"),
-    py::arg("inputs_np"),
-    py::arg("funcs"),
-    py::arg("size0"),
-    py::arg("size1"),
-    py::return_value_policy::take_ownership);
-
-  m.def("observe_hermite_interp_2D", &observe_hermite_interp_2D<CasadiFunctions>,
-    "Observe 2D variables",
-    py::arg("t_interp_np"),
-    py::arg("ts_np"),
-    py::arg("ys_np"),
-    py::arg("yps_np"),
-    py::arg("inputs_np"),
-    py::arg("funcs"),
-    py::arg("size0"),
-    py::arg("size1"),
-    py::arg("size2"),
-    py::return_value_policy::take_ownership);
-
-  m.def("observe_1D", &observe_1D<CasadiFunctions>,
-    "Observe 1D variables",
-    py::arg("ts_np"),
-    py::arg("ys_np"),
-    py::arg("inputs_np"),
-    py::arg("funcs"),
-    py::arg("is_f_contiguous"),
-    py::arg("size0"),
-    py::arg("size1"),
-    py::return_value_policy::take_ownership);
-
-  m.def("observe_2D", &observe_2D<CasadiFunctions>,
-    "Observe 2D variables",
-    py::arg("ts_np"),
-    py::arg("ys_np"),
-    py::arg("inputs_np"),
-    py::arg("funcs"),
-    py::arg("is_f_contiguous"),
-    py::arg("size0"),
-    py::arg("size1"),
-    py::arg("size2"),
+    py::arg("sizes"),
     py::return_value_policy::take_ownership);
 
 #ifdef IREE_ENABLE
@@ -169,73 +121,25 @@ PYBIND11_MODULE(idaklu, m)
     py::arg("options"),
     py::return_value_policy::take_ownership);
 
-  m.def("observe_0D", &observe_0D<IREEFunctions>,
-    "Observe 0D variables",
+  m.def("observe_ND", &observe_ND<IREEFunctions>,
+    "Observe ND variables",
     py::arg("ts_np"),
     py::arg("ys_np"),
     py::arg("inputs_np"),
     py::arg("funcs"),
     py::arg("is_f_contiguous"),
-    py::arg("size0"),
+    py::arg("sizes"),
     py::return_value_policy::take_ownership);
 
-  m.def("observe_hermite_interp_0D", &observe_hermite_interp_0D<IREEFunctions>,
-    "Observe 0D variables",
+  m.def("observe_hermite_interp_ND", &observe_hermite_interp_ND<IREEFunctions>,
+    "Observe ND variables",
     py::arg("t_interp_np"),
     py::arg("ts_np"),
     py::arg("ys_np"),
     py::arg("yps_np"),
     py::arg("inputs_np"),
     py::arg("funcs"),
-    py::arg("size0"),
-    py::return_value_policy::take_ownership);
-
-  m.def("observe_hermite_interp_1D", &observe_hermite_interp_1D<IREEFunctions>,
-    "Observe 1D variables",
-    py::arg("t_interp_np"),
-    py::arg("ts_np"),
-    py::arg("ys_np"),
-    py::arg("yps_np"),
-    py::arg("inputs_np"),
-    py::arg("funcs"),
-    py::arg("size0"),
-    py::arg("size1"),
-    py::return_value_policy::take_ownership);
-
-  m.def("observe_hermite_interp_2D", &observe_hermite_interp_2D<IREEFunctions>,
-    "Observe 2D variables",
-    py::arg("t_interp_np"),
-    py::arg("ts_np"),
-    py::arg("ys_np"),
-    py::arg("yps_np"),
-    py::arg("inputs_np"),
-    py::arg("funcs"),
-    py::arg("size0"),
-    py::arg("size1"),
-    py::arg("size2"),
-    py::return_value_policy::take_ownership);
-
-  m.def("observe_1D", &observe_1D<IREEFunctions>,
-    "Observe 1D variables",
-    py::arg("ts_np"),
-    py::arg("ys_np"),
-    py::arg("inputs_np"),
-    py::arg("funcs"),
-    py::arg("is_f_contiguous"),
-    py::arg("size0"),
-    py::arg("size1"),
-    py::return_value_policy::take_ownership);
-
-  m.def("observe_2D", &observe_2D<IREEFunctions>,
-    "Observe 2D variables",
-    py::arg("ts_np"),
-    py::arg("ys_np"),
-    py::arg("inputs_np"),
-    py::arg("funcs"),
-    py::arg("is_f_contiguous"),
-    py::arg("size0"),
-    py::arg("size1"),
-    py::arg("size2"),
+    py::arg("sizes"),
     py::return_value_policy::take_ownership);
 #endif
 

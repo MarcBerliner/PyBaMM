@@ -115,19 +115,14 @@ class ProcessedVariable:
             t = t[idxs_sort]
 
         if self.hermite_interpolation and not observe_raw:
-            self._check_interp(t)
-            ts, ys, yps, funcs, is_f_contiguous = self._setup_cpp_inputs()
-
             pybamm.logger.debug(
                 "Observing and Hermite interpolating the variable in C++"
             )
-            entries = self._observe_hermite_cpp(t, ts, ys, yps, funcs)
+            entries = self._observe_hermite_cpp(t)
             is_interpolated = True
         elif self._linear_observable_cpp(t):
-            ts, ys, yps, funcs, is_f_contiguous = self._setup_cpp_inputs()
-
             pybamm.logger.debug("Observing the variable raw data in C++")
-            entries = self._observe_raw_cpp(ts, ys, funcs, is_f_contiguous)
+            entries = self._observe_raw_cpp()
             is_interpolated = False
         else:
             pybamm.logger.debug("Observing the variable raw data in Python")
@@ -143,11 +138,22 @@ class ProcessedVariable:
         entries = self._observe_postfix(entries, t)
         return entries, is_interpolated
 
-    def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
-        pass  # pragma: no cover
+    def _observe_hermite_cpp(self, t):
+        self._check_interp(t)
 
-    def _observe_raw_cpp(self, ts, ys, funcs, is_f_contiguous):
-        pass  # pragma: no cover
+        ts, ys, yps, funcs, inputs, _ = self._setup_cpp_inputs()
+        sizes = self._size(t)
+        return pybamm.solvers.idaklu_solver.idaklu.observe_hermite_interp_ND(
+            t, ts, ys, yps, inputs, funcs, sizes
+        )
+
+    def _observe_raw_cpp(self):
+        ts, ys, _, funcs, inputs, is_f_contiguous = self._setup_cpp_inputs()
+        sizes = self._size(self.t_pts)
+
+        return pybamm.solvers.idaklu_solver.idaklu.observe_ND(
+            ts, ys, inputs, funcs, is_f_contiguous, sizes
+        )
 
     def _observe_raw_python(self):
         pass  # pragma: no cover
@@ -156,6 +162,9 @@ class ProcessedVariable:
         return entries
 
     def _interp_setup(self, entries, t):
+        pass  # pragma: no cover
+
+    def _size(self, t):
         pass  # pragma: no cover
 
     def _process_spatial_variable_names(self, spatial_variable):
@@ -307,9 +316,11 @@ class ProcessedVariable:
                 )
             funcs[i] = funcs_unique[vars]
 
+        inputs = self.all_inputs_casadi
+
         is_f_contiguous = _is_f_contiguous(self.all_ys)
 
-        return ts, ys, yps, funcs, is_f_contiguous
+        return ts, ys, yps, funcs, inputs, is_f_contiguous
 
     def _check_interp(self, t):
         """
@@ -448,25 +459,9 @@ class ProcessedVariable0D(ProcessedVariable):
             cumtrapz_ic=cumtrapz_ic,
         )
 
-    def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
-        size0 = len(t)
-
-        inputs = self.all_inputs_casadi
-        return pybamm.solvers.idaklu_solver.idaklu.observe_hermite_interp_0D(
-            t, ts, ys, yps, inputs, funcs, size0
-        )
-
-    def _observe_raw_cpp(self, ts, ys, funcs, is_f_contiguous):
-        size0 = len(self.t_pts)
-
-        inputs = self.all_inputs_casadi
-        return pybamm.solvers.idaklu_solver.idaklu.observe_0D(
-            ts, ys, inputs, funcs, is_f_contiguous, size0
-        )
-
     def _observe_raw_python(self):
         # initialise empty array of the correct size
-        entries = np.empty(len(self.t_pts))
+        entries = np.empty(self._size(self.t_pts))
         idx = 0
         # Evaluate the base_variable index-by-index
         for ts, ys, inputs, base_var_casadi in zip(
@@ -494,6 +489,9 @@ class ProcessedVariable0D(ProcessedVariable):
         coords_for_interp = {"t": t}
 
         return entries_for_interp, coords_for_interp
+
+    def _size(self, t):
+        return [len(t)]
 
 
 class ProcessedVariable1D(ProcessedVariable):
@@ -538,27 +536,8 @@ class ProcessedVariable1D(ProcessedVariable):
             cumtrapz_ic=cumtrapz_ic,
         )
 
-    def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
-        size0 = len(t)
-        len_space = self.base_eval_shape[0]
-
-        inputs = self.all_inputs_casadi
-        return pybamm.solvers.idaklu_solver.idaklu.observe_hermite_interp_1D(
-            t, ts, ys, yps, inputs, funcs, size0, len_space
-        )
-
-    def _observe_raw_cpp(self, ts, ys, funcs, is_f_contiguous):
-        size0 = len(self.t_pts)
-        len_space = self.base_eval_shape[0]
-
-        inputs = self.all_inputs_casadi
-        return pybamm.solvers.idaklu_solver.idaklu.observe_1D(
-            ts, ys, inputs, funcs, is_f_contiguous, size0, len_space
-        )
-
     def _observe_raw_python(self):
-        len_space = self.base_eval_shape[0]
-        entries = np.empty((len_space, len(self.t_pts)))
+        entries = np.empty(self._size(self.t_pts))
 
         # Evaluate the base_variable index-by-index
         idx = 0
@@ -609,6 +588,11 @@ class ProcessedVariable1D(ProcessedVariable):
         coords_for_interp = {self.first_dimension: pts_for_interp, "t": t}
 
         return entries_for_interp, coords_for_interp
+
+    def _size(self, t):
+        t_size = len(t)
+        space_size = self.base_eval_shape[0]
+        return [space_size, t_size]
 
 
 class ProcessedVariable2D(ProcessedVariable):
@@ -664,40 +648,12 @@ class ProcessedVariable2D(ProcessedVariable):
         self.first_dim_size = len(first_dim_pts)
         self.second_dim_size = len(second_dim_pts)
 
-    def _observe_hermite_cpp(self, t, ts, ys, yps, funcs):
-        size0 = len(t)
-        first_dim_size = self.first_dim_size
-        second_dim_size = self.second_dim_size
-
-        inputs = self.all_inputs_casadi
-        return pybamm.solvers.idaklu_solver.idaklu.observe_hermite_interp_2D(
-            t, ts, ys, yps, inputs, funcs, size0, first_dim_size, second_dim_size
-        )
-
-    def _observe_raw_cpp(self, ts, ys, funcs, is_f_contiguous):
-        size0 = len(self.t_pts)
-        first_dim_size = self.first_dim_size
-        second_dim_size = self.second_dim_size
-
-        inputs = self.all_inputs_casadi
-        return pybamm.solvers.idaklu_solver.idaklu.observe_2D(
-            ts,
-            ys,
-            inputs,
-            funcs,
-            is_f_contiguous,
-            size0,
-            first_dim_size,
-            second_dim_size,
-        )
-
     def _observe_raw_python(self):
         """
         Initialise a 2D object that depends on x and r, x and z, x and R, or R and r.
         """
-        first_dim_size = self.first_dim_size
-        second_dim_size = self.second_dim_size
-        entries = np.empty((first_dim_size, second_dim_size, len(self.t_pts)))
+        first_dim_size, second_dim_size, t_size = self._size(self.t_pts)
+        entries = np.empty((first_dim_size, second_dim_size, t_size))
 
         # Evaluate the base_variable index-by-index
         idx = 0
@@ -801,6 +757,12 @@ class ProcessedVariable2D(ProcessedVariable):
         }
 
         return entries_for_interp, coords_for_interp
+
+    def _size(self, t):
+        first_dim_size = self.first_dim_size
+        second_dim_size = self.second_dim_size
+        t_size = len(t)
+        return [first_dim_size, second_dim_size, t_size]
 
 
 class ProcessedVariable2DSciKitFEM(ProcessedVariable2D):
